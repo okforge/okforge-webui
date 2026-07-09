@@ -1,0 +1,31 @@
+# okforge-webui venv: the engine + everything the webui and MCP server
+# import on top of it. All version pins.
+#
+# The engine — auto-published to PyPI from
+# https://github.com/okforge/okforge on every release tag.
+okforge==0.9.4
+
+# webui backend
+fastapi==0.139.0
+uvicorn==0.49.0
+sse-starlette==3.4.5
+httpx==0.28.1
+pydantic==2.13.4
+
+# MCP server (/mcp) — must match okforge's own exact pin (its native
+# `okforge mcp` server also depends on this package); okforge 0.9.4 pins
+# mcp==1.27.1 exactly, so this can't float independently anymore.
+mcp==1.27.1
+
+# Pre-conversion (OCR + translate) — the packaged home of the former
+# repo-local qwen_page_ocr.py / translate_pages.py, published from
+# https://github.com/okforge/okforge-vision-ocr. The webui invokes its
+# console scripts okforge-vision-ocr / okforge-translate-pages.
+okforge-vision-ocr==0.1.0
+
+# probe (webui PDF inspection)
+PyMuPDF==1.27.2.3
+openai==2.44.0
+pillow==12.2.0
+python-dotenv==1.2.2
+PyYAML==6.0.3

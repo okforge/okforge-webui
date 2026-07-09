@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>okforge — scan to knowledge base</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>okforge</h1>
+  <div class="hdr-right">
+    <label class="hdr-label">LLM server
+      <select id="endpoint"></select>
+    </label>
+    <span id="busy-light" class="light" title="LLM server status">&#9679;</span>
+    <span id="busy-text" class="muted"></span>
+  </div>
+</header>
+
+<main>
+
+<!-- ================================================== 1 · Probe -->
+<section class="stage" id="stage-probe">
+  <h2><span class="stageno">1</span> Probe — what kind of document is this?</h2>
+  <div class="row">
+    <label>PDF
+      <select id="inbox-select"></select>
+    </label>
+    <button id="inbox-refresh" class="small" title="Re-scan the inbox directory">&#8635;</button>
+    <span class="or">or</span>
+    <input type="file" id="upload-file" accept=".pdf">
+    <button id="upload-btn">Upload</button>
+    <progress id="upload-progress" class="hidden" max="100" value="0"></progress>
+    <button id="probe-btn" class="primary">Probe</button>
+  </div>
+  <div id="probe-result" class="result hidden"></div>
+</section>
+
+<!-- ================================================== 2 · Pilot -->
+<section class="stage" id="stage-pilot">
+  <h2><span class="stageno">2</span> Pilot — OCR a few pages, check them</h2>
+  <div class="row">
+    <label>Pages <input type="text" id="pilot-pages" placeholder="e.g. 16 or 5-7" size="8"></label>
+    <label class="check"><input type="checkbox" id="pilot-figures">
+      <span title="Also crop line drawings and engravings, not just photos">--figures</span></label>
+    <label class="check"><input type="checkbox" id="pilot-tables">
+      <span title="Complex tables: model reasoning on + table-reconstruction prompt. Much slower — use per page">table mode</span></label>
+    <button id="pilot-btn" class="primary">Run pilot</button>
+    <span id="pilot-status" class="muted"></span>
+  </div>
+  <div id="pilot-review" class="hidden"></div>
+  <details id="pilot-logbox" class="hidden"><summary>pilot log</summary>
+    <pre id="pilot-log" class="log"></pre>
+  </details>
+</section>
+
+<!-- ================================================== 3 · Set up KB -->
+<section class="stage" id="stage-kb">
+  <h2><span class="stageno">3</span> Knowledge base</h2>
+  <div class="row">
+    <label>Existing
+      <select id="kb-select"><option value="">— pick a KB —</option></select>
+    </label>
+    <span class="or">or new:</span>
+    <label>Name <input type="text" id="kb-name" placeholder="MySubject" size="18"></label>
+    <label>Lang <input type="text" id="kb-lang" value="en" size="3"></label>
+    <button id="kb-create-btn">Create</button>
+  </div>
+  <div id="kb-info" class="result hidden"></div>
+</section>
+
+<!-- ================================================== 4 · Run -->
+<section class="stage" id="stage-run">
+  <h2><span class="stageno">4</span> Run — OCR &#8594; (translate) &#8594; add</h2>
+  <div class="row">
+    <label class="check"><input type="checkbox" id="run-textlayer"
+      title="Trust the PDF's embedded text layer: chunked text extraction, no OCR, no image extraction. Old scans often carry poor OCR text — leave off to render pages and run our own OCR + image management."> use embedded text layer (skip OCR &amp; images)</label>
+    <label class="check"><input type="checkbox" id="run-translate"> translate to English</label>
+    <label>From page <input type="number" id="run-from" value="1" min="1"></label>
+    <label>to <input type="number" id="run-to" value="1" min="1"></label>
+    <label>Pages per chunk <input type="number" id="chunk-pages" value="20" min="1" max="200" size="4"></label>
+    <span id="chunk-plan" class="muted"></span>
+    <button id="run-btn" class="primary">Start run</button>
+  </div>
+  <div class="row">
+    <label>Re-OCR one page <input type="number" id="reocr-page" min="1" size="5"
+      title="Redo a single badly-OCR'd page and splice it into its chunk's artifacts (re-ingest the chunk afterwards)"></label>
+    <label class="check"><input type="checkbox" id="reocr-tables">
+      <span title="Complex tables: model reasoning on + table-reconstruction prompt. Much slower per page">table mode</span></label>
+    <button id="reocr-btn" class="small">Re-OCR page</button>
+    <button id="recompile-btn" class="small"
+      title="After re-OCRing page(s): remove the chunk containing this page from the wiki (keeping the corrected artifacts) and re-add it in one job">Re-ingest chunk</button>
+  </div>
+  <div id="run-live" class="hidden">
+    <div class="row">
+      <strong id="run-live-title"></strong>
+      <progress id="run-progress" value="0" max="1"></progress>
+      <span id="run-progress-text" class="muted"></span>
+    </div>
+    <div id="run-crops" class="cropstrip"></div>
+    <details><summary>job log</summary><pre id="run-log" class="log"></pre></details>
+  </div>
+  <h3>Job queue
+    <label class="check" style="font-weight:normal;font-size:0.8rem">
+      <input type="checkbox" id="jobs-all"> show all KBs</label>
+  </h3>
+  <table id="jobs-table">
+    <thead><tr><th>#</th><th>type</th><th>KB</th><th>pages</th><th>status</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+</section>
+
+<!-- ================================================== 5 · Verify & use -->
+<section class="stage" id="stage-verify">
+  <h2><span class="stageno">5</span> Verify &amp; use</h2>
+  <div id="verify-empty" class="muted">Pick a KB in stage 3 first.</div>
+  <div id="verify-body" class="hidden">
+    <div class="kbstats" id="kb-stats"></div>
+    <div class="row">
+      <button id="publish-btn" class="small"
+        title="Build this KB's wiki into a static Quartz site under /opt/okforge/sites/; making it public stays a manual rsync (command in the job log)">Publish site</button>
+      <a id="site-link" class="hidden" target="_blank" rel="noopener">view published site</a>
+      <button id="copy-publish-cmd" class="small hidden"
+        title="Copy the rsync command that pushes this site to the public host">copy go-public cmd</button>
+      <span id="site-status" class="muted"></span>
+    </div>
+    <div class="row">
+      <input type="text" id="query-input" placeholder="Ask the knowledge base&hellip;" style="flex:1">
+      <button id="query-btn" class="primary">Ask</button>
+    </div>
+    <div id="query-answer" class="hidden"></div>
+    <h3>Wiki</h3>
+    <div class="row">
+      <input type="text" id="wiki-search" placeholder="Search the wiki (fast, no LLM)&hellip;" style="flex:1">
+      <button id="wiki-search-btn" class="small">Search</button>
+    </div>
+    <div class="wiki">
+      <nav id="wiki-nav"></nav>
+      <article id="wiki-article"><p class="muted">Pick a page on the left.</p></article>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<div id="lightbox" class="hidden"><img alt=""></div>
+<div id="toast" class="hidden"></div>
+<script src="app.js"></script>
+</body>
+</html>

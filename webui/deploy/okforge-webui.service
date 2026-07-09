@@ -1,0 +1,26 @@
+# okforge web UI backend — FastAPI/uvicorn on 127.0.0.1:8500 (PLAN.md step 7).
+# Installed by webui/deploy.sh to /etc/systemd/system/okforge-webui.service.
+#
+# Runs as the operator's user from the repo checkout so the venv, the KB
+# dirs, and webui/jobs.sqlite are exactly the ones the CLI workflow uses
+# (deploy.sh rewrites User=/Group= and paths). The job queue recovers
+# orphaned jobs on restart, so Restart=on-failure is safe.
+
+[Unit]
+Description=okforge web UI backend (uvicorn webui.api:app)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=okforge
+Group=okforge
+WorkingDirectory=/opt/okforge/tooling
+ExecStart=/opt/okforge/tooling/.venv/bin/uvicorn webui.api:app --host 127.0.0.1 --port 8500
+Restart=on-failure
+RestartSec=5
+# Config overrides (see webui/config.py) go here if ever needed, e.g.:
+# Environment=OPENKB_WEBUI_INBOX=/opt/okforge/inbox
+
+[Install]
+WantedBy=multi-user.target

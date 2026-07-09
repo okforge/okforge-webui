@@ -1,0 +1,95 @@
+"""Configuration for the okforge web UI backend.
+
+Everything is a module constant, overridable by environment variable, so
+the systemd unit can point at different dirs without code edits. Default
+paths follow the README layout: this repo at /opt/okforge/tooling with
+.venv/ inside it, KBs under /opt/okforge/kbs/.
+"""
+
+import os
+from pathlib import Path
+
+HOME = Path.home()
+
+# Where the PDF dropdown looks (plus uploads land here).
+INBOX_DIR = Path(os.environ.get("OPENKB_WEBUI_INBOX", HOME / "Desktop"))
+
+# Parent directory scanned for KB dirs (anything with a state dir inside —
+# see state_dir() below).
+KB_ROOT = Path(os.environ.get("OPENKB_WEBUI_KB_ROOT", HOME))
+
+# Per-KB state dir name. STATE_DIR_NAME is what `okforge init` scaffolds as
+# of engine v0.8.0; LEGACY_STATE_DIR_NAME is what a not-yet-migrated KB
+# still has (`okforge migrate` moves it) — mirrors okforge.config's own
+# STATE_DIR_NAME/state_dir(), reimplemented here rather than imported
+# since this repo deliberately only shells out to the engine CLI, never
+# imports it as a library (see AGENTS.md).
+STATE_DIR_NAME = ".okforge"
+LEGACY_STATE_DIR_NAME = ".openkb"
+
+
+def state_dir(kb_dir: Path) -> Path:
+    """A KB's state directory: .okforge/ if present, else legacy .openkb/."""
+    new = kb_dir / STATE_DIR_NAME
+    if new.is_dir():
+        return new
+    legacy = kb_dir / LEGACY_STATE_DIR_NAME
+    if legacy.is_dir():
+        return legacy
+    return new
+
+# The shared tooling dir: venv with the engine + the okforge-vision-ocr
+# package's console scripts (formerly repo-local qwen_page_ocr.py /
+# translate_pages.py — see requirements.txt).
+OPENKB_DIR = Path(os.environ.get("OPENKB_WEBUI_OPENKB_DIR", HOME / "OpenKB"))
+OPENKB_BIN = OPENKB_DIR / ".venv" / "bin" / "openkb"
+OCR_BIN = OPENKB_DIR / ".venv" / "bin" / "okforge-vision-ocr"
+TRANSLATE_BIN = OPENKB_DIR / ".venv" / "bin" / "okforge-translate-pages"
+
+# LLM endpoints offered in the UI dropdown, as "label=url,label=url".
+# Deployments with real hosts set this in the systemd unit (deploy.sh
+# passes OPENKB_WEBUI_ENDPOINTS through); the default suits a single
+# local llama.cpp/vLLM-style server.
+ENDPOINTS: dict[str, str] = {}
+for _part in os.environ.get(
+    "OPENKB_WEBUI_ENDPOINTS", "local=http://localhost:8080/v1"
+).split(","):
+    _label, _, _url = _part.strip().partition("=")
+    if _label and _url:
+        ENDPOINTS[_label] = _url
+if not ENDPOINTS:
+    raise RuntimeError("OPENKB_WEBUI_ENDPOINTS parsed to no endpoints")
+DEFAULT_ENDPOINT = os.environ.get(
+    "OPENKB_WEBUI_DEFAULT_ENDPOINT", next(iter(ENDPOINTS))
+)
+if DEFAULT_ENDPOINT not in ENDPOINTS:
+    raise RuntimeError(
+        f"OPENKB_WEBUI_DEFAULT_ENDPOINT {DEFAULT_ENDPOINT!r} not in ENDPOINTS"
+    )
+
+# Model string openkb init expects (LiteLLM format, per README).
+OPENKB_MODEL = os.environ.get("OPENKB_WEBUI_MODEL", "openai/Qwen3.6-27B-MTP")
+
+# Job queue state lives next to this file.
+WEBUI_DIR = Path(__file__).resolve().parent
+JOBS_DB = WEBUI_DIR / "jobs.sqlite"
+JOB_LOG_DIR = WEBUI_DIR / "logs"
+
+# Default chunk size for full-book ingests (pages per OCR→add chunk).
+DEFAULT_CHUNK_PAGES = 20
+
+# Quartz publishing (ROADMAP P6): one shared install builds per-KB static
+# sites into SITES_DIR/<Subject>/. Making a site public stays a manual
+# rsync of that dir to the internet host (KB-OPERATIONS.md).
+QUARTZ_DIR = Path(os.environ.get("OPENKB_WEBUI_QUARTZ_DIR", "/opt/okforge/quartz"))
+SITES_DIR = Path(os.environ.get("OPENKB_WEBUI_SITES_DIR", "/opt/okforge/sites"))
+# Public host a published site's baseUrl points at (og-image/social URLs).
+PUBLIC_SITE_HOST = os.environ.get("OPENKB_WEBUI_PUBLIC_SITE_HOST", "localhost")
+# node binary (quartz is invoked as `node quartz/bootstrap-cli.mjs` because
+# npx lives in the user's npm-global dir, outside the systemd PATH).
+NODE_BIN = os.environ.get("OPENKB_WEBUI_NODE", "/usr/bin/node")
+# Where published sites live on the public host — used to render the
+# copy-paste go-public rsync command (publishing stays manual by design).
+PUBLIC_SITE_DEST = os.environ.get(
+    "OPENKB_WEBUI_PUBLIC_SITE_DEST", "user@host:/var/www/sites"
+)
