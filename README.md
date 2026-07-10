@@ -40,27 +40,43 @@ transcription and image crops before committing) → **KB setup** →
 ## Directory layout
 
 ```
-/opt/okforge/
-    tooling/            ← this repo; .venv/ inside it
+<base>/                 e.g. /opt/okforge/  or  C:\okforge\
+    okforge-webui/      ← this repo; .venv/ inside it
     kbs/<Subject>/      ← one self-contained knowledge base per subject
     inbox/              ← PDF drop point for the web UI
     quartz/             ← shared Quartz install (site publishing, optional)
     sites/<Subject>/    ← published static sites (optional)
 ```
 
-Every KB is self-contained (sources, wiki, engine state, `.env`, its own
-git history) — copy the directory and you've copied the KB. The UI
-discovers KBs by scanning the KB root; nothing is registered anywhere
-else.
+The base directory can be anywhere — all defaults are relative to where
+this repo sits (each is individually overridable by env var, see
+Configuration). Every KB is self-contained (sources, wiki, engine state,
+`.env`, its own git history) — copy the directory and you've copied the
+KB. The UI discovers KBs by scanning the KB root; nothing is registered
+anywhere else.
 
 ## Install
 
+Linux/macOS:
+
 ```bash
-git clone https://github.com/okforge/okforge-webui /opt/okforge/tooling
-cd /opt/okforge/tooling
+cd /opt/okforge   # or any base dir
+git clone https://github.com/okforge/okforge-webui
+cd okforge-webui
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-mkdir -p /opt/okforge/kbs /opt/okforge/inbox
+mkdir -p ../kbs ../inbox
+```
+
+Windows (PowerShell):
+
+```powershell
+cd C:\okforge     # or any base dir
+git clone https://github.com/okforge/okforge-webui
+cd okforge-webui
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+md ..\kbs, ..\inbox
 ```
 
 `requirements.txt` pins the two okforge packages from PyPI — the
@@ -73,15 +89,30 @@ dependencies.
 
 ## Run it
 
-Development (one process serves the static frontend and the API):
+One process serves the frontend, the API, and the MCP server:
 
 ```bash
-.venv/bin/uvicorn webui.api:app --host 127.0.0.1 --port 8500
-# browse http://localhost:8500/
+.venv/bin/python -m webui          # Linux/macOS
+.venv\Scripts\python -m webui      # Windows
+# browse http://<host>:8500/
 ```
 
-Production is Apache (static docroot + `/api/` reverse proxy) in front of
-the same backend under systemd:
+`OPENKB_WEBUI_HOST` / `OPENKB_WEBUI_PORT` change the bind (default
+`0.0.0.0:8500` — LAN-visible; use `127.0.0.1` to keep it local). Same
+trust model in every mode: LAN-only, no auth — don't expose it beyond a
+network you trust.
+
+To run it as a service: on Linux,
+[`webui/deploy/okforge-webui-standalone.service`](webui/deploy/okforge-webui-standalone.service)
+is a ready-to-edit systemd unit; on Windows, use Task Scheduler
+("At startup", run `<repo>\.venv\Scripts\python.exe -m webui`) or
+[NSSM](https://nssm.cc/).
+
+### Optional: Apache in front (Linux)
+
+For port 80, a LAN vhost name, and an easy basic-auth option, `deploy.sh`
+installs Apache (static docroot + `/api/` reverse proxy) in front of the
+same backend under systemd:
 
 ```bash
 SERVER_NAME=okforge.local OPENKB_WEBUI_ENDPOINTS="gpu1=http://gpu1:8080/v1" \
@@ -89,26 +120,31 @@ SERVER_NAME=okforge.local OPENKB_WEBUI_ENDPOINTS="gpu1=http://gpu1:8080/v1" \
 ```
 
 `deploy.sh` is idempotent — rerun it after changes (it restarts the
-backend, so **never while a job is running**). Frontend-only changes are
-just `sudo rsync -a --delete webui/static/ /var/www/okforge-webui/`.
+backend, so **never while a job is running**). In this mode frontend
+files are served by Apache, so frontend-only changes are
+`sudo rsync -a --delete webui/static/ /var/www/okforge-webui/`
+(standalone mode serves them straight from the repo — nothing to copy).
 
 ## Configuration
 
-Everything is an environment variable (set them in the systemd unit —
-`deploy.sh` passes any that are exported when it runs):
+Everything is an environment variable (for the systemd deployments, set
+them in the unit — `deploy.sh` passes any that are exported when it
+runs). `<base>` below means the directory this repo sits in:
 
 | variable | default | meaning |
 |---|---|---|
+| `OPENKB_WEBUI_HOST` | `0.0.0.0` | bind address (`python -m webui`) |
+| `OPENKB_WEBUI_PORT` | `8500` | bind port (`python -m webui`) |
 | `OPENKB_WEBUI_ENDPOINTS` | `local=http://localhost:8080/v1` | LLM endpoints for the UI dropdown, `label=url,label=url` |
 | `OPENKB_WEBUI_DEFAULT_ENDPOINT` | first label | pre-selected endpoint |
 | `OPENKB_WEBUI_MODEL` | `openai/Qwen3.6-27B-MTP` | model string new KBs are initialized with |
-| `OPENKB_WEBUI_KB_ROOT` | `/opt/okforge/kbs` | where KBs live |
-| `OPENKB_WEBUI_INBOX` | `/opt/okforge/inbox` | PDF drop dir |
-| `OPENKB_WEBUI_QUARTZ_DIR` | `/opt/okforge/quartz` | shared Quartz install |
-| `OPENKB_WEBUI_SITES_DIR` | `/opt/okforge/sites` | published-site output |
+| `OPENKB_WEBUI_KB_ROOT` | `<base>/kbs` | where KBs live |
+| `OPENKB_WEBUI_INBOX` | `<base>/inbox` | PDF drop dir |
+| `OPENKB_WEBUI_QUARTZ_DIR` | `<base>/quartz` | shared Quartz install |
+| `OPENKB_WEBUI_SITES_DIR` | `<base>/sites` | published-site output |
 | `OPENKB_WEBUI_PUBLIC_SITE_HOST` | `localhost` | public host for published sites' baseUrl |
 | `OPENKB_WEBUI_PUBLIC_SITE_DEST` | `user@host:/var/www/sites` | rsync target shown by the go-public helper |
-| `OPENKB_WEBUI_NODE` | `/usr/bin/node` | node binary for Quartz builds under systemd |
+| `OPENKB_WEBUI_NODE` | `node` on PATH, else `/usr/bin/node` | node binary for Quartz builds |
 
 Each KB additionally carries its own `.env` (`OPENAI_API_BASE`,
 `LLM_API_KEY`) and `config.yaml`. One setting matters more than all the

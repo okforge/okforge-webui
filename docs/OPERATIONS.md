@@ -243,13 +243,18 @@ snapshots). Moving a concept file to another topic dir by hand is fine
 - **Adds suddenly much slower**: check thinking got re-enabled (missing
   `llm_extra_body` block in a new KB) or the model was reloaded with a
   different preset (`curl -s http://<llm-host>:8080/props`).
-- **Backend up, UI stale**: hard-refresh; static files are served by Apache,
-  not uvicorn.
+- **Backend up, UI stale**: hard-refresh. On Apache deployments also
+  remember static files are served from the docroot, not the repo — an
+  un-rsynced frontend change never reaches the browser (standalone mode
+  serves straight from the repo).
 
 ## Updating an instance
 
-- **Frontend-only** (files under `webui/static/`): safe mid-job —
-  `sudo rsync -a --delete webui/static/ /var/www/okforge-webui/`.
+- **Frontend-only** (files under `webui/static/`): safe mid-job. Apache
+  deployments copy to the docroot
+  (`sudo rsync -a --delete webui/static/ /var/www/okforge-webui/`);
+  standalone deployments serve straight from the repo — a `git pull` is
+  the whole update.
 - **Backend / engine**: wait for an idle queue, then `git pull`,
   `pip install -r requirements.txt` into the instance's venv, and
   `sudo systemctl restart okforge-webui` — **never restart while an

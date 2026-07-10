@@ -53,6 +53,31 @@ _worker_started = False
 _current = {"job_id": None, "proc": None}  # what the worker is running now
 _current_lock = threading.Lock()
 
+# Killing a job must take out everything it spawned. POSIX: children get
+# their own session at spawn so killpg reaches the whole tree. Windows:
+# no sessions/process groups in the POSIX sense — spawn with a new
+# process group and let taskkill /T walk the tree.
+if os.name == "nt":
+    _POPEN_GROUP_KWARGS = {
+        "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP
+    }
+else:
+    _POPEN_GROUP_KWARGS = {"start_new_session": True}
+
+
+def _terminate_tree(pid: int) -> None:
+    """Best-effort kill of a job process and everything it spawned."""
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(pid)],
+                capture_output=True,
+            )
+        else:
+            os.killpg(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+
 
 def _conn() -> sqlite3.Connection:
     c = sqlite3.connect(config.JOBS_DB, timeout=30)
@@ -234,7 +259,7 @@ def cancel(job_id: int) -> dict:
         with _current_lock:
             proc = _current["proc"] if _current["job_id"] == job_id else None
         if proc is not None and proc.poll() is None:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            _terminate_tree(proc.pid)
         _set_status(job_id, "cancelled")
     return get_job(job_id)
 
@@ -257,7 +282,8 @@ def _run_logged(job_id: int, cmd: list[str], cwd: Path,
             stdin=subprocess.DEVNULL,  # any interactive prompt fails fast
             stdout=log,
             stderr=subprocess.STDOUT,
-            start_new_session=True,  # own process group, so cancel can killpg
+            # own session/group so cancel can kill the whole tree
+            **_POPEN_GROUP_KWARGS,
         )
         with _db_lock, _conn() as c:
             c.execute("UPDATE jobs SET pid = ? WHERE id = ?", (proc.pid, job_id))
@@ -968,10 +994,7 @@ def start_worker() -> None:
         ).fetchall()
     for row in orphans:
         if row["pid"]:
-            try:
-                os.killpg(row["pid"], signal.SIGTERM)
-            except (ProcessLookupError, PermissionError):
-                pass
+            _terminate_tree(row["pid"])
     with _db_lock, _conn() as c:
         c.execute("UPDATE jobs SET status = 'queued' WHERE status = 'running'")
     threading.Thread(target=_worker_loop, name="job-worker", daemon=True).start()

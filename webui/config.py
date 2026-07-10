@@ -1,22 +1,28 @@
 """Configuration for the okforge web UI backend.
 
 Everything is a module constant, overridable by environment variable, so
-the systemd unit can point at different dirs without code edits. Default
-paths follow the README layout: this repo at /opt/okforge/tooling with
-.venv/ inside it, KBs under /opt/okforge/kbs/.
+a systemd unit (or any other launcher) can point at different dirs
+without code edits. Default paths are layout-relative: everything lives
+beside this repo's checkout — the documented Linux install
+(/opt/okforge/<repo> → /opt/okforge/{kbs,inbox,quartz,sites}) and a
+Windows checkout (C:\\okforge\\<repo> → C:\\okforge\\kbs …) both work
+with no environment at all.
 """
 
 import os
+import shutil
 from pathlib import Path
 
-HOME = Path.home()
+# This repo's checkout (webui/'s parent) and the base dir beside it.
+REPO_DIR = Path(__file__).resolve().parent.parent
+_BASE = REPO_DIR.parent
 
 # Where the PDF dropdown looks (plus uploads land here).
-INBOX_DIR = Path(os.environ.get("OPENKB_WEBUI_INBOX", HOME / "Desktop"))
+INBOX_DIR = Path(os.environ.get("OPENKB_WEBUI_INBOX", _BASE / "inbox"))
 
 # Parent directory scanned for KB dirs (anything with a state dir inside —
 # see state_dir() below).
-KB_ROOT = Path(os.environ.get("OPENKB_WEBUI_KB_ROOT", HOME))
+KB_ROOT = Path(os.environ.get("OPENKB_WEBUI_KB_ROOT", _BASE / "kbs"))
 
 # Per-KB state dir name. STATE_DIR_NAME is what `okforge init` scaffolds as
 # of engine v0.8.0; LEGACY_STATE_DIR_NAME is what a not-yet-migrated KB
@@ -38,13 +44,15 @@ def state_dir(kb_dir: Path) -> Path:
         return legacy
     return new
 
-# The shared tooling dir: venv with the engine + the okforge-vision-ocr
-# package's console scripts (formerly repo-local qwen_page_ocr.py /
-# translate_pages.py — see requirements.txt).
-OPENKB_DIR = Path(os.environ.get("OPENKB_WEBUI_OPENKB_DIR", HOME / "OpenKB"))
-OPENKB_BIN = OPENKB_DIR / ".venv" / "bin" / "openkb"
-OCR_BIN = OPENKB_DIR / ".venv" / "bin" / "okforge-vision-ocr"
-TRANSLATE_BIN = OPENKB_DIR / ".venv" / "bin" / "okforge-translate-pages"
+# The dir holding .venv with the engine + the okforge-vision-ocr
+# package's console scripts (see requirements.txt) — normally this repo.
+OPENKB_DIR = Path(os.environ.get("OPENKB_WEBUI_OPENKB_DIR", REPO_DIR))
+# Console scripts live in .venv/bin (POSIX) or .venv\Scripts\*.exe (Windows).
+_VENV_BIN = OPENKB_DIR / ".venv" / ("Scripts" if os.name == "nt" else "bin")
+_EXE = ".exe" if os.name == "nt" else ""
+OPENKB_BIN = _VENV_BIN / f"openkb{_EXE}"
+OCR_BIN = _VENV_BIN / f"okforge-vision-ocr{_EXE}"
+TRANSLATE_BIN = _VENV_BIN / f"okforge-translate-pages{_EXE}"
 
 # LLM endpoints offered in the UI dropdown, as "label=url,label=url".
 # Deployments with real hosts set this in the systemd unit (deploy.sh
@@ -81,13 +89,16 @@ DEFAULT_CHUNK_PAGES = 20
 # Quartz publishing (ROADMAP P6): one shared install builds per-KB static
 # sites into SITES_DIR/<Subject>/. Making a site public stays a manual
 # rsync of that dir to the internet host (KB-OPERATIONS.md).
-QUARTZ_DIR = Path(os.environ.get("OPENKB_WEBUI_QUARTZ_DIR", "/opt/okforge/quartz"))
-SITES_DIR = Path(os.environ.get("OPENKB_WEBUI_SITES_DIR", "/opt/okforge/sites"))
+QUARTZ_DIR = Path(os.environ.get("OPENKB_WEBUI_QUARTZ_DIR", _BASE / "quartz"))
+SITES_DIR = Path(os.environ.get("OPENKB_WEBUI_SITES_DIR", _BASE / "sites"))
 # Public host a published site's baseUrl points at (og-image/social URLs).
 PUBLIC_SITE_HOST = os.environ.get("OPENKB_WEBUI_PUBLIC_SITE_HOST", "localhost")
 # node binary (quartz is invoked as `node quartz/bootstrap-cli.mjs` because
-# npx lives in the user's npm-global dir, outside the systemd PATH).
-NODE_BIN = os.environ.get("OPENKB_WEBUI_NODE", "/usr/bin/node")
+# npx often lives outside a service's PATH). PATH lookup first, then the
+# usual Linux location.
+NODE_BIN = os.environ.get(
+    "OPENKB_WEBUI_NODE", shutil.which("node") or "/usr/bin/node"
+)
 # Where published sites live on the public host — used to render the
 # copy-paste go-public rsync command (publishing stays manual by design).
 PUBLIC_SITE_DEST = os.environ.get(
