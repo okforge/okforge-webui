@@ -37,6 +37,14 @@ transcription and image crops before committing) → **KB setup** →
   — full-text search, graph view, backlinks — one button, then a printed
   rsync command to go public.
 
+## Prerequisites
+
+- **Python 3.10+**
+- **Git** — for the clone; on Windows it also provides the `grep`
+  binary the engine's query agent uses.
+- **Node.js 18+** — only for the optional static-site publishing
+  (Quartz); everything else runs without it.
+
 ## Directory layout
 
 ```
@@ -79,6 +87,10 @@ python -m venv .venv
 md ..\kbs, ..\inbox
 ```
 
+(PowerShell gotcha: anything in the *current* directory needs a `.\`
+prefix to run — `.\script.ps1`, not `script.ps1`. The `.venv\Scripts\…`
+forms above already qualify.)
+
 `requirements.txt` pins the two okforge packages from PyPI — the
 [okforge engine](https://github.com/okforge/okforge) (ingestion, wiki
 compilation, query; see its
@@ -89,9 +101,13 @@ dependencies.
 
 ## Run it
 
-One process serves the frontend, the API, and the MCP server:
+One process serves the frontend, the API, and the MCP server. Run it
+**from this repo's directory** — `python -m webui` resolves the `webui`
+package relative to the current dir, so from anywhere else Python exits
+with `No module named webui`:
 
 ```bash
+cd <base>/okforge-webui
 .venv/bin/python -m webui          # Linux/macOS
 .venv\Scripts\python -m webui      # Windows
 # browse http://<host>:8500/

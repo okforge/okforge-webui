@@ -178,16 +178,36 @@ Turns a KB's `wiki/` into a static site with full-text search, a graph
 view, backlinks, and hover previews — the shareable counterpart to
 Obsidian: no app to install, just a URL.
 
-- **Quartz install (once per machine)** at `/opt/okforge/quartz`:
+- **Quartz install (once per machine)** into `<base>/quartz` (needs
+  Node.js 18+ — see the README prerequisites).
+
+  Linux/macOS:
   ```bash
   git clone https://github.com/jackyzha0/quartz.git /opt/okforge/quartz
-  cd /opt/okforge/quartz && git checkout v5 && npm ci && npx quartz plugin install
+  cd /opt/okforge/quartz
+  git checkout v5
+  npm ci
+  npx quartz plugin install
   ```
-  The `plugin install` step is easy to miss: v5's community plugins
-  (footer, explorer, …) live in a generated `.quartz/plugins/` dir, and
-  builds fail with `Could not resolve "../../.quartz/plugins"` without
-  it. The publish job also needs `node` at `/usr/bin/node`
-  (or set OPENKB_WEBUI_NODE) — it can't use npx under systemd.
+
+  Windows (PowerShell):
+  ```powershell
+  git clone https://github.com/jackyzha0/quartz.git C:\okforge\quartz
+  cd C:\okforge\quartz
+  git checkout v5
+  npm ci
+  npx quartz plugin install
+  ```
+
+  **Do not skip step 5, `npx quartz plugin install`.** Quartz v5's
+  community plugins (footer, explorer, …) live in a generated
+  `.quartz/plugins/` dir, and without it builds fail with the cryptic
+  `Could not resolve "../../.quartz/plugins"` — nothing in that error
+  says a plugin step was missed.
+
+  The publish job invokes `node` directly (npx isn't reliably on a
+  service's PATH): it uses `node` from PATH, falling back to
+  `/usr/bin/node`, or set `OPENKB_WEBUI_NODE` explicitly.
 
 - **Publish site** button (verify stage) builds the wiki into
   `<sites-dir>/<Subject>/` via a `publish` job; the
