@@ -377,7 +377,7 @@ def get_wiki(name: str, rel_path: str = ""):
     if target.is_dir():
         dirs, files = [], []
         for p in sorted(target.iterdir(), key=lambda p: p.name.lower()):
-            rel = str(p.relative_to(base))
+            rel = p.relative_to(base).as_posix()
             if p.is_dir():
                 dirs.append(rel)
             elif p.suffix.lower() in _WIKI_TEXT_EXTS or \

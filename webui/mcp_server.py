@@ -157,7 +157,7 @@ def search(project: str, query: str, max_results: int = 20) -> list[dict]:
     def _scan_md(path: Path) -> None:
         if path.stat().st_size > _MAX_FILE_BYTES:
             return
-        rel = str(path.relative_to(wiki))
+        rel = path.relative_to(wiki).as_posix()
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
             pos = line.lower().find(needle)
             if pos != -1:
@@ -203,7 +203,7 @@ def search(project: str, query: str, max_results: int = 20) -> list[dict]:
                 )
                 results.append(
                     {
-                        "path": str(pj.relative_to(wiki)),
+                        "path": pj.relative_to(wiki).as_posix(),
                         "page": page.get("page"),
                         "snippet": _snippet(line, max(0, line.lower().find(needle))),
                     }
@@ -222,7 +222,8 @@ def read_wiki_page(project: str, path: str) -> str:
     Cheap and instant — prefer search + this over ask() for lookups."""
     kb_dir = kb.resolve_kb(project)
     wiki = kb_dir / "wiki"
-    target = (wiki / path).resolve()
+    # Tolerate Windows-style separators from clients that cached them.
+    target = (wiki / path.replace("\\", "/")).resolve()
     if not target.is_relative_to(wiki.resolve()):
         raise ValueError(f"path escapes the wiki: {path!r}")
     if target.suffix not in (".md", ".json") or not target.is_file():
