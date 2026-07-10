@@ -22,7 +22,9 @@ compilation, query) and
   `translate`, `add`, `full`, `reocr`, `extract`, `recompile`,
   `publish`). The single worker is a load-bearing design decision.
 - `webui/kb.py`, `webui/probe.py` — KB discovery/init and PDF probing.
-- `webui/config.py` — all configuration; env-var driven, no secrets.
+- `webui/config.py` — all configuration; env-var driven, no secrets in
+  code (hosted endpoints' API keys arrive via `OPENKB_WEBUI_ENDPOINTS`,
+  `label=url|key|model`).
 - `webui/mcp_server.py` — the `/mcp` streamable-HTTP server.
 - `webui/static/` — the frontend (no build step).
 - `webui/deploy.sh` + `webui/deploy/` — Apache vhost + systemd unit.

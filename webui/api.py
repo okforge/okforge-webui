@@ -461,10 +461,15 @@ async def get_slots(endpoint: str = config.DEFAULT_ENDPOINT):
     """LLM busy light: proxy llama.cpp's /slots on the chosen host."""
     if endpoint not in config.ENDPOINTS:
         raise HTTPException(400, f"unknown endpoint: {endpoint!r}")
+    # Endpoints with an API key are hosted services (OpenRouter etc.) —
+    # no llama.cpp /slots to probe, and no queue worth a busy light.
+    if endpoint in config.ENDPOINT_KEYS:
+        return {"endpoint": endpoint, "hosted": True,
+                "total": 0, "busy": 0, "idle": 0}
     base = config.ENDPOINTS[endpoint].removesuffix("/v1")
     # Some hosts front llama.cpp with a model router that 400s without an
     # explicit model name; llama.cpp itself ignores the extra param.
-    model = config.OPENKB_MODEL.split("/", 1)[-1]
+    model = config.endpoint_model(endpoint).split("/", 1)[-1]
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(f"{base}/slots", params={"model": model})

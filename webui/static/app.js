@@ -67,6 +67,11 @@ async function pollSlots() {
   try {
     const s = await api(`/api/server/slots?endpoint=${$('#endpoint').value}`);
     if (s.error) throw new Error(s.error);
+    if (s.hosted) {
+      light.className = 'light idle';
+      text.textContent = 'hosted';
+      return;
+    }
     light.className = 'light ' + (s.busy > 0 ? 'busy' : 'idle');
     text.textContent = s.busy > 0 ? `${s.busy}/${s.total} slots busy` : 'idle';
   } catch (e) {

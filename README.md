@@ -151,9 +151,9 @@ runs). `<base>` below means the directory this repo sits in:
 |---|---|---|
 | `OPENKB_WEBUI_HOST` | `0.0.0.0` | bind address (`python -m webui`) |
 | `OPENKB_WEBUI_PORT` | `8500` | bind port (`python -m webui`) |
-| `OPENKB_WEBUI_ENDPOINTS` | `local=http://localhost:8080/v1` | LLM endpoints for the UI dropdown, `label=url,label=url` |
+| `OPENKB_WEBUI_ENDPOINTS` | `local=http://localhost:8080/v1` | LLM endpoints for the UI dropdown, comma-separated `label=url[\|key[\|model]]` — key and model only for hosted services (see below) |
 | `OPENKB_WEBUI_DEFAULT_ENDPOINT` | first label | pre-selected endpoint |
-| `OPENKB_WEBUI_MODEL` | `openai/Qwen3.6-27B-MTP` | model string new KBs are initialized with |
+| `OPENKB_WEBUI_MODEL` | `openai/Qwen3.6-27B-MTP` | model string new KBs are initialized with (per-endpoint `model` overrides it) |
 | `OPENKB_WEBUI_KB_ROOT` | `<base>/kbs` | where KBs live |
 | `OPENKB_WEBUI_INBOX` | `<base>/inbox` | PDF drop dir |
 | `OPENKB_WEBUI_QUARTZ_DIR` | `<base>/quartz` | shared Quartz install |
@@ -161,6 +161,23 @@ runs). `<base>` below means the directory this repo sits in:
 | `OPENKB_WEBUI_PUBLIC_SITE_HOST` | `localhost` | public host for published sites' baseUrl |
 | `OPENKB_WEBUI_PUBLIC_SITE_DEST` | `user@host:/var/www/sites` | rsync target shown by the go-public helper |
 | `OPENKB_WEBUI_NODE` | `node` on PATH, else `/usr/bin/node` | node binary for Quartz builds |
+
+Local llama.cpp/vLLM endpoints need only `label=url`. A hosted
+OpenAI-compatible service takes two more `|`-separated fields — its API
+key and the model in LiteLLM `provider/model` format:
+
+```
+OPENKB_WEBUI_ENDPOINTS="gpu1=http://gpu1:8080/v1,openrouter=https://openrouter.ai/api/v1|sk-or-v1-...|openrouter/qwen/qwen3.6-27b"
+```
+
+KBs created on such an endpoint get the key in their `.env`, the model
+in their `config.yaml`, and a provider-appropriate thinking-off block
+(OpenRouter's `reasoning.enabled=false` instead of llama.cpp's
+`chat_template_kwargs`). OCR/translate jobs strip the LiteLLM provider
+prefix and pass the rest as the OpenAI-protocol model name. Note the
+key lives in plain text in the unit file/environment — acceptable on a
+single-operator LAN box; protect the systemd drop-in accordingly
+(`chmod 640`).
 
 Each KB additionally carries its own `.env` (`OPENAI_API_BASE`,
 `LLM_API_KEY`) and `config.yaml`. One setting matters more than all the

@@ -54,17 +54,29 @@ OPENKB_BIN = _VENV_BIN / f"openkb{_EXE}"
 OCR_BIN = _VENV_BIN / f"okforge-vision-ocr{_EXE}"
 TRANSLATE_BIN = _VENV_BIN / f"okforge-translate-pages{_EXE}"
 
-# LLM endpoints offered in the UI dropdown, as "label=url,label=url".
-# Deployments with real hosts set this in the systemd unit (deploy.sh
-# passes OPENKB_WEBUI_ENDPOINTS through); the default suits a single
-# local llama.cpp/vLLM-style server.
+# LLM endpoints offered in the UI dropdown, as comma-separated
+# "label=url[|key[|model]]" entries. Local llama.cpp/vLLM-style servers
+# need only "label=url". Hosted services (OpenRouter etc.) append the
+# API key and usually a model override in LiteLLM provider/model format,
+# e.g.  openrouter=https://openrouter.ai/api/v1|sk-or-v1-...|openrouter/qwen/qwen3.6-27b
+# Deployments set this in the systemd unit (deploy.sh passes
+# OPENKB_WEBUI_ENDPOINTS through); the default suits a single local server.
 ENDPOINTS: dict[str, str] = {}
+ENDPOINT_KEYS: dict[str, str] = {}    # only endpoints that need a real key
+ENDPOINT_MODELS: dict[str, str] = {}  # only endpoints overriding OPENKB_MODEL
 for _part in os.environ.get(
     "OPENKB_WEBUI_ENDPOINTS", "local=http://localhost:8080/v1"
 ).split(","):
-    _label, _, _url = _part.strip().partition("=")
-    if _label and _url:
-        ENDPOINTS[_label] = _url
+    _label, _, _rest = _part.strip().partition("=")
+    _url, _, _extra = _rest.partition("|")
+    if not (_label and _url):
+        continue
+    ENDPOINTS[_label] = _url
+    _key, _, _model = _extra.partition("|")
+    if _key:
+        ENDPOINT_KEYS[_label] = _key
+    if _model:
+        ENDPOINT_MODELS[_label] = _model
 if not ENDPOINTS:
     raise RuntimeError("OPENKB_WEBUI_ENDPOINTS parsed to no endpoints")
 DEFAULT_ENDPOINT = os.environ.get(
@@ -77,6 +89,16 @@ if DEFAULT_ENDPOINT not in ENDPOINTS:
 
 # Model string openkb init expects (LiteLLM format, per README).
 OPENKB_MODEL = os.environ.get("OPENKB_WEBUI_MODEL", "openai/Qwen3.6-27B-MTP")
+
+
+def endpoint_key(label: str) -> str:
+    """API key for an endpoint — "no-key" for local servers without one."""
+    return ENDPOINT_KEYS.get(label, "no-key")
+
+
+def endpoint_model(label: str) -> str:
+    """LiteLLM model string KBs on this endpoint are initialized with."""
+    return ENDPOINT_MODELS.get(label, OPENKB_MODEL)
 
 # Job queue state lives next to this file.
 WEBUI_DIR = Path(__file__).resolve().parent

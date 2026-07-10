@@ -51,6 +51,15 @@ def _read_env_endpoint(kb_dir: Path) -> str | None:
     return None
 
 
+def endpoint_label(kb_dir: Path) -> str | None:
+    """The configured endpoint this KB points at, from its .env's
+    OPENAI_API_BASE — None if the URL matches no current endpoint."""
+    url = _read_env_endpoint(kb_dir)
+    return next(
+        (label for label, u in config.ENDPOINTS.items() if u == url), None
+    )
+
+
 def _count(pattern_dir: Path, glob: str = "*.md") -> int:
     # rglob: topic-tree KBs nest concepts under concepts/<topic>/;
     # _topic.md files are tree nodes, not concepts.
@@ -96,10 +105,7 @@ def kb_info(kb_dir: Path) -> dict:
     if cfg_path.is_file():
         cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     endpoint_url = _read_env_endpoint(kb_dir)
-    endpoint = next(
-        (label for label, url in config.ENDPOINTS.items() if url == endpoint_url),
-        None,
-    )
+    endpoint = endpoint_label(kb_dir)
     wiki = kb_dir / "wiki"
     return {
         "name": kb_dir.name,
@@ -147,10 +153,11 @@ def init_kb(name: str, lang: str = "en", endpoint: str | None = None) -> dict:
     # pure downside — remember it and put it back afterwards.
     prev_default = _read_default_kb()
 
+    model = config.endpoint_model(endpoint)
     # --json: okforge's non-interactive machine mode (no prompts at all,
     # so no stdin newline for the old API-key prompt is needed).
     proc = subprocess.run(
-        [str(config.OPENKB_BIN), "init", "-m", config.OPENKB_MODEL, "-l", lang, "--json"],
+        [str(config.OPENKB_BIN), "init", "-m", model, "-l", lang, "--json"],
         cwd=kb_dir,
         stdin=subprocess.DEVNULL,
         text=True,
@@ -165,22 +172,36 @@ def init_kb(name: str, lang: str = "en", endpoint: str | None = None) -> dict:
 
     env_path = kb_dir / ".env"
     if not env_path.exists():
+        # OPENAI_API_BASE doubles as the KB→endpoint-label mapping read
+        # back by _read_env_endpoint, so it's written even for providers
+        # (openrouter/...) whose LiteLLM route ignores it.
         env_path.write_text(
-            f"LLM_API_KEY=no-key\nOPENAI_API_BASE={config.ENDPOINTS[endpoint]}\n",
+            f"LLM_API_KEY={config.endpoint_key(endpoint)}\n"
+            f"OPENAI_API_BASE={config.ENDPOINTS[endpoint]}\n",
             encoding="utf-8",
         )
 
-    # MANDATORY on our llama.cpp hosts: they serve Qwen3 with thinking ON
-    # by default; without this block every add pays a hidden reasoning
-    # pass (measured 27 min -> 2.3 min per 20-page chunk). KB-OPERATIONS.md.
+    # MANDATORY: Qwen3 serves with thinking ON by default; without this
+    # block every add pays a hidden reasoning pass (measured 27 min ->
+    # 2.3 min per 20-page chunk on llama.cpp). Each API dialect spells
+    # "don't think" differently: chat_template_kwargs for llama.cpp/vLLM,
+    # reasoning.enabled for OpenRouter. KB-OPERATIONS.md.
+    if model.startswith("openrouter/"):
+        thinking_off = (
+            "llm_extra_body:\n"
+            "  reasoning:\n"
+            "    enabled: false\n"
+        )
+    else:
+        thinking_off = (
+            "llm_extra_body:\n"
+            "  chat_template_kwargs:\n"
+            "    enable_thinking: false\n"
+        )
     cfg_path = config.state_dir(kb_dir) / "config.yaml"
     if cfg_path.is_file() and "llm_extra_body" not in cfg_path.read_text(encoding="utf-8"):
         with cfg_path.open("a", encoding="utf-8") as f:
-            f.write(
-                "llm_extra_body:\n"
-                "  chat_template_kwargs:\n"
-                "    enable_thinking: false\n"
-            )
+            f.write(thinking_off)
 
     if prev_default and Path(prev_default).is_dir():
         subprocess.run(

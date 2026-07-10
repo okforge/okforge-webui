@@ -301,8 +301,24 @@ def _endpoint_env(params: dict) -> dict:
     label = params.get("endpoint") or config.DEFAULT_ENDPOINT
     if label not in config.ENDPOINTS:
         raise ValueError(f"unknown endpoint: {label!r}")
+    # The OCR/translate tools speak raw OpenAI protocol, so they get the
+    # model name without its LiteLLM provider prefix (openai/X -> X,
+    # openrouter/qwen/Y -> qwen/Y).
     return {"OPENAI_API_BASE": config.ENDPOINTS[label],
-            "LLM_API_KEY": "no-key"}
+            "LLM_API_KEY": config.endpoint_key(label),
+            "OKFORGE_VISION_MODEL": config.endpoint_model(label).split("/", 1)[-1]}
+
+
+def _kb_vision_env(kb_dir: Path) -> dict:
+    """Model override for OCR/translate runs inside a KB dir. The KB's
+    .env (via cwd) already supplies base URL and key; the model only
+    needs overriding when the KB's endpoint declares its own (hosted
+    services use different model names than the local default)."""
+    label = kbmod.endpoint_label(kb_dir)
+    if label is None or label not in config.ENDPOINT_MODELS:
+        return {}
+    return {"OKFORGE_VISION_MODEL":
+            config.ENDPOINT_MODELS[label].split("/", 1)[-1]}
 
 
 def _pages_spec(params: dict) -> str | None:
@@ -389,7 +405,8 @@ def _run_ocr(job: dict) -> None:
     out_md = ocr_out_md(kb_dir, pdf, pages, bool(params.get("translate")))
     out_md.parent.mkdir(exist_ok=True)
     cmd = _ocr_cmd(pdf, out_md, pages, bool(params.get("figures")))
-    rc = _run_logged(job["id"], cmd, cwd=kb_dir)
+    rc = _run_logged(job["id"], cmd, cwd=kb_dir,
+                     env_extra=_kb_vision_env(kb_dir))
     if rc != 0:
         raise RuntimeError(f"okforge-vision-ocr exited {rc}")
 
@@ -435,7 +452,8 @@ def _run_translate(job: dict) -> None:
     src_name = _LANG_NAMES.get(params.get("src_lang") or "")
     if src_name and src_name != "English":
         cmd += ["--from", src_name]
-    rc = _run_logged(job["id"], cmd, cwd=kb_dir)
+    rc = _run_logged(job["id"], cmd, cwd=kb_dir,
+                     env_extra=_kb_vision_env(kb_dir))
     if rc != 0:
         raise RuntimeError(f"okforge-translate-pages exited {rc}")
 
@@ -523,7 +541,8 @@ def _run_reocr(job: dict) -> None:
         tmp_md = tmp / f"{chunk_stem}.md"
         cmd = _ocr_cmd(pdf, tmp_md, str(page), bool(params.get("figures")),
                        tables=bool(params.get("tables")))
-        rc = _run_logged(job["id"], cmd, cwd=kb_dir)
+        rc = _run_logged(job["id"], cmd, cwd=kb_dir,
+                         env_extra=_kb_vision_env(kb_dir))
         if rc != 0:
             raise RuntimeError(f"okforge-vision-ocr exited {rc}")
         new_pages = json.loads(
@@ -553,7 +572,8 @@ def _run_reocr(job: dict) -> None:
             src_name = _LANG_NAMES.get(params.get("src_lang") or "")
             if src_name and src_name != "English":
                 cmd += ["--from", src_name]
-            rc = _run_logged(job["id"], cmd, cwd=kb_dir)
+            rc = _run_logged(job["id"], cmd, cwd=kb_dir,
+                             env_extra=_kb_vision_env(kb_dir))
             if rc != 0:
                 raise RuntimeError(f"okforge-translate-pages exited {rc}")
             en_page = json.loads(
