@@ -183,6 +183,7 @@ async function runProbe() {
   $('#run-from').max = $('#run-to').max = p.page_count;
   updateChunkPlan();
   updateStageGates();
+  saveSession();
 }
 
 // --------------------------------------------------------- stage 2: pilot
@@ -290,6 +291,7 @@ async function loadKbs(selectName) {
 
 function selectKb(name) {
   state.kb = (state.kbs || []).find(k => k.name === name) || null;
+  saveSession();
   const box = $('#kb-info');
   if (!state.kb) { box.classList.add('hidden'); updateStageGates(); return; }
   const k = state.kb;
@@ -919,6 +921,36 @@ async function runQuery() {
   }
 }
 
+// ---------------------------------------------------- session persistence
+
+// Survive a reload: the probed PDF and selected KB come back, everything
+// else (form fields) is rebuilt by re-running the cheap local probe.
+const SESSION_KEY = 'okforge.session';
+
+function saveSession() {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      pdf: state.pdf,
+      kb: state.kb ? state.kb.name : null,
+    }));
+  } catch (e) { /* private mode / storage full — persistence is best-effort */ }
+}
+
+function loadSession() {
+  try { return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); }
+  catch (e) { return null; }
+}
+
+async function restoreSession(saved) {
+  // The KB restore rides through loadKbs(saved.kb) → selectKb; this brings
+  // back the probed PDF. If it's gone from the inbox, drop it silently.
+  if (!saved || !saved.pdf) return;
+  const sel = $('#inbox-select');
+  if (![...sel.options].some(o => o.value === saved.pdf)) { saveSession(); return; }
+  sel.value = saved.pdf;
+  await runProbe();
+}
+
 // ------------------------------------------------------------ stage gates
 
 function setGateHint(sel, text) {
@@ -962,6 +994,7 @@ function init() {
       $('#pilot-logbox').classList.add('hidden');
       $('#pilot-status').textContent = '';
       updateStageGates();
+      saveSession();
     }
   };
   // Discovering in the pilot that you need --figures should carry into the
@@ -1001,8 +1034,12 @@ function init() {
     e => { if (e.key === 'Escape') $('#lightbox').classList.add('hidden'); });
   $('#endpoint').onchange = pollSlots;
 
-  loadKbs().then(pollSlots).catch(e => toast(e.message));
-  loadInbox().catch(e => toast(e.message));
+  const saved = loadSession();
+  Promise.all([
+    loadKbs(saved ? saved.kb : undefined).then(pollSlots),
+    loadInbox(),
+  ]).then(() => restoreSession(saved))
+    .catch(e => toast(e.message));
   refreshJobs().catch(e => toast(e.message));
   setInterval(pollSlots, 6000);
   setInterval(() => refreshJobs().catch(() => {}), 5000);
