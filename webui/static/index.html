@@ -41,6 +41,7 @@
 <!-- ================================================== 2 · Pilot -->
 <section class="stage" id="stage-pilot">
   <h2><span class="stageno">2</span> Pilot — OCR a few pages, check them</h2>
+  <p class="gate-hint hidden" id="pilot-gate-hint"></p>
   <div class="row">
     <label>Pages <input type="text" id="pilot-pages" placeholder="e.g. 16 or 5-7" size="8"></label>
     <label class="check"><input type="checkbox" id="pilot-figures">
@@ -74,16 +75,20 @@
 <!-- ================================================== 4 · Run -->
 <section class="stage" id="stage-run">
   <h2><span class="stageno">4</span> Run — OCR &#8594; (translate) &#8594; add</h2>
+  <p class="gate-hint hidden" id="run-gate-hint"></p>
   <div class="row">
     <label class="check"><input type="checkbox" id="run-textlayer"
       title="Trust the PDF's embedded text layer: chunked text extraction, no OCR, no image extraction. Old scans often carry poor OCR text — leave off to render pages and run our own OCR + image management."> use embedded text layer (skip OCR &amp; images)</label>
     <label class="check"><input type="checkbox" id="run-translate"> translate to English</label>
+    <label class="check"><input type="checkbox" id="run-figures">
+      <span title="Also crop line drawings and engravings, not just photos">extract figures &amp; line drawings (--figures)</span></label>
     <label>From page <input type="number" id="run-from" value="1" min="1"></label>
     <label>to <input type="number" id="run-to" value="1" min="1"></label>
     <label>Pages per chunk <input type="number" id="chunk-pages" value="20" min="1" max="200" size="4"></label>
     <span id="chunk-plan" class="muted"></span>
     <button id="run-btn" class="primary">Start run</button>
   </div>
+  <details class="advanced"><summary>Fix a badly-OCR'd page (advanced)</summary>
   <div class="row">
     <label>Re-OCR one page <input type="number" id="reocr-page" min="1" size="5"
       title="Redo a single badly-OCR'd page and splice it into its chunk's artifacts (re-ingest the chunk afterwards)"></label>
@@ -93,6 +98,7 @@
     <button id="recompile-btn" class="small"
       title="After re-OCRing page(s): remove the chunk containing this page from the wiki (keeping the corrected artifacts) and re-add it in one job">Re-ingest chunk</button>
   </div>
+  </details>
   <div id="run-live" class="hidden">
     <div class="row">
       <strong id="run-live-title"></strong>

@@ -49,7 +49,11 @@ main { max-width: 62rem; margin: 1rem auto 4rem; padding: 0 1rem; }
   padding: .9rem 1.1rem;
   margin-bottom: 1rem;
 }
-.stage.disabled { opacity: .55; pointer-events: none; }
+/* Disabled stages ghost their contents but the gate hint (the line saying
+   WHY the stage is off) stays full-opacity and readable. */
+.stage.disabled { pointer-events: none; }
+.stage.disabled > :not(.gate-hint) { opacity: .55; }
+.gate-hint { color: var(--muted); font-size: .85rem; margin: -.3rem 0 .6rem; }
 .stage h2 { font-size: 1rem; margin: 0 0 .7rem; }
 .stage h3 { font-size: .9rem; margin: 1rem 0 .4rem; }
 .stageno {
@@ -249,3 +253,11 @@ progress { flex: 1; min-width: 10rem; height: .8rem; }
 
 /* upload progress */
 #upload-progress { width: 120px; }
+
+/* advanced fold (page-repair tools) */
+details.advanced { margin: .4rem 0; }
+details.advanced > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: .85rem;
+}

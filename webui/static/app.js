@@ -384,7 +384,7 @@ async function startRun() {
       kb: state.kb.name,
       pdf: state.pdf,
       pages: `${from}-${to}`,
-      figures: $('#pilot-figures').checked,
+      figures: $('#run-figures').checked,
       translate: $('#run-translate').checked,
       src_lang: state.probe.language_guess || null,
       chunk_pages: parseInt($('#chunk-pages').value, 10) || 20,
@@ -404,7 +404,7 @@ async function startReocr() {
     kb: state.kb.name,
     pdf: state.pdf,
     pages: String(page),
-    figures: $('#pilot-figures').checked,
+    figures: $('#run-figures').checked,
     tables: $('#reocr-tables').checked,
     translate: $('#run-translate').checked,
     src_lang: state.probe.language_guess || null,
@@ -886,19 +886,54 @@ async function runQuery() {
 
 // ------------------------------------------------------------ stage gates
 
+function setGateHint(sel, text) {
+  const h = $(sel);
+  h.textContent = text;
+  h.classList.toggle('hidden', !text);
+}
+
 function updateStageGates() {
   // The pilot is never ghosted once a PDF is probed: even "text" PDFs are
   // usually old scans whose embedded OCR we don't trust — the default
   // pipeline renders pages and does our own OCR + image extraction.
-  $('#stage-pilot').classList.toggle('disabled', !state.probe);
-  $('#stage-run').classList.toggle('disabled', !state.probe);
-  $('#stage-verify').classList.toggle('disabled', !state.kb);
+  const needProbe = !state.probe;
+  const needKb = !state.kb;
+  $('#stage-pilot').classList.toggle('disabled', needProbe);
+  setGateHint('#pilot-gate-hint', needProbe ? 'Probe a PDF in stage 1 first.' : '');
+  $('#stage-run').classList.toggle('disabled', needProbe || needKb);
+  let runHint = '';
+  if (needProbe && needKb)
+    runHint = 'Probe a PDF in stage 1 and pick or create a KB in stage 3 first.';
+  else if (needProbe)
+    runHint = 'Probe a PDF in stage 1 first.';
+  else if (needKb)
+    runHint = 'Pick or create a KB in stage 3 first.';
+  setGateHint('#run-gate-hint', runHint);
+  $('#stage-verify').classList.toggle('disabled', needKb);
 }
 
 // ------------------------------------------------------------------ init
 
 function init() {
   $('#inbox-refresh').onclick = () => loadInbox().catch(e => toast(e.message));
+  // Picking a different PDF invalidates the probe and everything staged on
+  // it — otherwise a run/pilot would silently use the OLD file.
+  $('#inbox-select').onchange = e => {
+    if (state.pdf && e.target.value !== state.pdf) {
+      state.pdf = null;
+      state.probe = null;
+      $('#probe-result').classList.add('hidden');
+      $('#pilot-review').classList.add('hidden');
+      $('#pilot-logbox').classList.add('hidden');
+      $('#pilot-status').textContent = '';
+      updateStageGates();
+    }
+  };
+  // Discovering in the pilot that you need --figures should carry into the
+  // run; unticking the run box must NOT reach back into the pilot.
+  $('#pilot-figures').onchange = e => {
+    if (e.target.checked) $('#run-figures').checked = true;
+  };
   $('#upload-btn').onclick = () => uploadPdf().catch(e => toast(e.message));
   $('#probe-btn').onclick = () => runProbe().catch(e => toast(e.message));
   $('#pilot-btn').onclick = () => runPilot().catch(e => toast(e.message));
