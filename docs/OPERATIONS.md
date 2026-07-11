@@ -94,13 +94,14 @@ llm_extra_body:
   parent; the old row keeps its terminal status forever.
 - **Stalled?** flag = running job with a log silent ≥ 20 min. Advisory only.
   A quiet `add` can be normal; a quiet first-page OCR usually is not.
-- **Re-OCR one page** (stage 4): redoes a single page and splices it into
+- **Re-OCR one page** (stage 4, behind the "Fix a badly-OCR'd page
+  (advanced)" fold): redoes a single page and splices it into
   its chunk's `.md`/`.pages.json` (and the English pair on translated
   runs). Tick **table mode** for pages with complex tables — model
   reasoning on + an information-first prompt (convey the table's
   meaning, not its grid). Much slower per page; preview with the pilot's
   table-mode checkbox first.
-- **Re-ingest chunk** (stage 4): after re-OCRing page(s), one job does
+- **Re-ingest chunk** (same fold): after re-OCRing page(s), one job does
   engine `remove --keep-raw --yes` + re-add of the chunk containing the
   given page — the wiki refresh step, no CLI needed.
 - **Duplicate runs**: Start run warns if a full job for the same pdf+kb
