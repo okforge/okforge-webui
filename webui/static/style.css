@@ -254,6 +254,13 @@ progress { flex: 1; min-width: 10rem; height: .8rem; }
 /* upload progress */
 #upload-progress { width: 120px; }
 
+/* stage-5 header flash when a run finishes */
+@keyframes stage-flash {
+  0%, 100% { background: transparent; }
+  25% { background: #ffe9a8; }
+}
+.stage h2.flash { animation: stage-flash 2.4s ease; border-radius: 4px; }
+
 /* advanced fold (page-repair tools) */
 details.advanced { margin: .4rem 0; }
 details.advanced > summary {

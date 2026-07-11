@@ -354,9 +354,9 @@ async function startRun() {
     j.type === 'full' && ['queued', 'running'].includes(j.status) &&
     j.kb === state.kb.name && j.params.pdf === state.pdf);
   if (existing &&
-      !confirm(`Run #${existing.id} for this PDF and KB is already ${existing.status}. ` +
-               'Start another anyway? (Its finished chunks would be skipped, ' +
-               'but usually you want Resume on the existing run instead.)')) {
+      !confirm(`Run #${existing.id} already covers this PDF and KB (${existing.status}). ` +
+               'Usually the "resume" button on that run in the job queue is what ' +
+               'you want. Start a second run anyway? (Finished chunks would be skipped.)')) {
     return;
   }
   let job;
@@ -505,22 +505,52 @@ function watchJob(job) {
   });
 }
 
+// Human labels for job types in the table (raw type stays in the tooltip).
+const JOB_TYPE_LABELS = {
+  full: 'book run', add: 'ingest', ocr: 'OCR', translate: 'translate',
+  reocr: 're-OCR page', recompile: 're-ingest chunk', pilot: 'pilot',
+  extract: 'extract', publish: 'publish site',
+};
+
+// id → status from the previous refresh, to detect running→done transitions
+let prevJobStatuses = new Map();
+
+function flashVerifyStage() {
+  const h = document.querySelector('#stage-verify h2');
+  h.classList.remove('flash');
+  void h.offsetWidth;  // restart the animation if already flashing
+  h.classList.add('flash');
+  setTimeout(() => h.classList.remove('flash'), 2600);
+}
+
 async function refreshJobs() {
   // Limit must comfortably cover a full book run (28 chunks × 2 children
   // + parent) so children aren't fetched without their parent row.
   const d = await api('/api/jobs?limit=150');
+  // Completion signal: a top-level run finishing should point at stage 5
+  // instead of ending silently. Empty map on first refresh after a page
+  // load means already-done jobs never re-toast.
+  for (const j of d.jobs) {
+    const prev = prevJobStatuses.get(j.id);
+    if (['queued', 'running'].includes(prev) && j.status === 'done' &&
+        !j.parent && ['full', 'add', 'publish'].includes(j.type)) {
+      toast(`Run #${j.id} finished — ask your KB in stage 5`, 'info');
+      flashVerifyStage();
+    }
+  }
+  prevJobStatuses = new Map(d.jobs.map(j => [j.id, j.status]));
   // Default view: the selected KB's jobs only — a couple of book runs
   // would otherwise grow the table forever. Anything still queued or
   // running stays visible regardless of KB (the queue is serial
   // machine-wide, so another KB's active job explains any waiting), as
-  // do KB-less jobs (pilots). With no KB selected the history stays
-  // hidden entirely: only live jobs show.
+  // do KB-less jobs (pilots) — including finished ones, so a pilot's
+  // history never vanishes just because no KB is selected yet.
   const active = j => ['queued', 'running'].includes(j.status);
   let jobsToShow;
   if ($('#jobs-all').checked) jobsToShow = d.jobs;
   else if (state.kb) jobsToShow = d.jobs.filter(j =>
     j.kb === state.kb.name || !j.kb || active(j));
-  else jobsToShow = d.jobs.filter(active);
+  else jobsToShow = d.jobs.filter(j => active(j) || !j.kb);
   const tbody = $('#jobs-table tbody');
   tbody.replaceChildren();
   // group children under their parent, newest parents first
@@ -590,14 +620,19 @@ async function refreshJobs() {
     }
     tr.append(
       el('td', {text: '#' + j.id}),
-      el('td', {text: j.type}),
+      el('td', {text: JOB_TYPE_LABELS[j.type] || j.type, title: j.type}),
       el('td', {text: j.kb || ''}),
       el('td', {text: j.params.pages || ''}),
       el('td', {}, el('span', {class: 'status ' + statusClass, text: statusText})),
       actions);
     tbody.append(tr);
-    // auto-follow whatever is running
-    if (j.status === 'running') watchJob(j);
+    // Auto-follow a running job — but never hijack an existing watch, and
+    // only for the selected KB's jobs (or KB-less ones like pilots). The
+    // manual "watch" button stays the explicit override; watchJob nulls
+    // watchingJobId on terminal status, so a run's next chunk still follows.
+    if (j.status === 'running' && state.watchingJobId === null &&
+        (!j.kb || (state.kb && j.kb === state.kb.name)))
+      watchJob(j);
   };
   for (const j of tops) {
     addRow(j, false);
@@ -609,7 +644,7 @@ async function refreshJobs() {
   if (!tbody.children.length) {
     tbody.append(el('tr', {}, el('td', {colspan: '6', class: 'muted',
       text: state.kb ? 'no jobs for this KB yet'
-                     : 'queue idle — pick a KB to see its job history'})));
+                     : 'no jobs yet — run a probe or pilot above'})));
   }
 }
 
