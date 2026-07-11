@@ -127,6 +127,22 @@ function uploadWithProgress(url, formData) {
   });
 }
 
+// A different PDF in the dropdown invalidates the probe and everything
+// staged on it — otherwise a run/pilot would silently use the OLD file.
+// Called from the dropdown's onchange AND after an upload auto-selects
+// the new file (programmatic .value changes fire no change event).
+function pdfSelectionChanged(newValue) {
+  if (!state.pdf || newValue === state.pdf) return;
+  state.pdf = null;
+  state.probe = null;
+  $('#probe-result').classList.add('hidden');
+  $('#pilot-review').classList.add('hidden');
+  $('#pilot-logbox').classList.add('hidden');
+  $('#pilot-status').textContent = '';
+  updateStageGates();
+  saveSession();
+}
+
 async function uploadPdf() {
   const f = $('#upload-file').files[0];
   if (!f) { toast('choose a .pdf file first'); return; }
@@ -134,6 +150,7 @@ async function uploadPdf() {
   fd.append('file', f);
   const d = await uploadWithProgress('/api/inbox', fd);
   await loadInbox(d.path);
+  pdfSelectionChanged(d.path);
   toast(`uploaded ${d.name}`, 'info');
 }
 
@@ -590,6 +607,7 @@ async function refreshJobs() {
       actions.append(' ', el('button', {class: 'small', text: 'review',
         onclick: () => {
           $('#stage-pilot').classList.remove('disabled');
+          $('#pilot-gate-hint').classList.add('hidden');
           loadPilotReview(j.id, j.params.pdf).catch(e => toast(e.message));
           $('#stage-pilot').scrollIntoView({behavior: 'smooth'});
         }}));
@@ -983,20 +1001,7 @@ function updateStageGates() {
 
 function init() {
   $('#inbox-refresh').onclick = () => loadInbox().catch(e => toast(e.message));
-  // Picking a different PDF invalidates the probe and everything staged on
-  // it — otherwise a run/pilot would silently use the OLD file.
-  $('#inbox-select').onchange = e => {
-    if (state.pdf && e.target.value !== state.pdf) {
-      state.pdf = null;
-      state.probe = null;
-      $('#probe-result').classList.add('hidden');
-      $('#pilot-review').classList.add('hidden');
-      $('#pilot-logbox').classList.add('hidden');
-      $('#pilot-status').textContent = '';
-      updateStageGates();
-      saveSession();
-    }
-  };
+  $('#inbox-select').onchange = e => pdfSelectionChanged(e.target.value);
   // Discovering in the pilot that you need --figures should carry into the
   // run; unticking the run box must NOT reach back into the pilot.
   $('#pilot-figures').onchange = e => {
