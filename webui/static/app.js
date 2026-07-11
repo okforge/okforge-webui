@@ -561,15 +561,18 @@ async function refreshJobs() {
   // Default view: the selected KB's jobs only — a couple of book runs
   // would otherwise grow the table forever. Anything still queued or
   // running stays visible regardless of KB (the queue is serial
-  // machine-wide, so another KB's active job explains any waiting), as
-  // do KB-less jobs (pilots) — including finished ones, so a pilot's
-  // history never vanishes just because no KB is selected yet.
+  // machine-wide, so another KB's active job explains any waiting).
+  // Finished KB-less jobs (pilots) show only for the currently probed
+  // PDF: your pilot never vanishes mid-flow, but pilots from other
+  // books/days don't pile up. "show all KBs" reveals everything.
   const active = j => ['queued', 'running'].includes(j.status);
+  const currentPdfKbless = j =>
+    !j.kb && state.pdf && j.params.pdf === state.pdf;
   let jobsToShow;
   if ($('#jobs-all').checked) jobsToShow = d.jobs;
   else if (state.kb) jobsToShow = d.jobs.filter(j =>
-    j.kb === state.kb.name || !j.kb || active(j));
-  else jobsToShow = d.jobs.filter(j => active(j) || !j.kb);
+    j.kb === state.kb.name || active(j) || currentPdfKbless(j));
+  else jobsToShow = d.jobs.filter(j => active(j) || currentPdfKbless(j));
   const tbody = $('#jobs-table tbody');
   tbody.replaceChildren();
   // group children under their parent, newest parents first
