@@ -30,7 +30,7 @@ sed -e "s/okforge\.local/$SERVER_NAME/g" \
     deploy/okforge-webui.conf > "$TMP_CONF"
 sudo install -m 644 "$TMP_CONF" "/etc/apache2/sites-available/$APP_NAME.conf"
 rm -f "$TMP_CONF"
-sudo a2enmod -q proxy proxy_http
+sudo a2enmod -q proxy proxy_http headers
 sudo a2ensite -q "$APP_NAME"
 sudo apachectl configtest
 sudo systemctl reload apache2
