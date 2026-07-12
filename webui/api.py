@@ -119,6 +119,27 @@ def post_kbs(req: KbCreate):
         raise HTTPException(500, str(e))
 
 
+@app.delete("/api/kbs/{name}")
+def delete_kb(name: str):
+    """Retire a KB: archive-first (ROADMAP P11) — the dir MOVES to
+    RETIRED_DIR, nothing is deleted; restore = move it back."""
+    try:
+        kb.resolve_kb(name)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    active = jobs.active_count_for_kb(name)
+    if active:
+        raise HTTPException(
+            409,
+            f"KB {name!r} has {active} queued/running job(s) — "
+            "wait for them or cancel them first",
+        )
+    try:
+        return kb.retire_kb(name)
+    except OSError as e:
+        raise HTTPException(500, f"retire failed: {e}")
+
+
 # ----------------------------------------------------------------- jobs
 
 class JobCreate(BaseModel):

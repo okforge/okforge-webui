@@ -146,6 +146,17 @@ def list_jobs(limit: int = 100) -> list[dict]:
     return [_annotate(_row_to_dict(r)) for r in rows]
 
 
+def active_count_for_kb(kb_name: str) -> int:
+    """Queued + running jobs bound to a KB — the retire-KB guard."""
+    with _db_lock, _conn() as c:
+        row = c.execute(
+            "SELECT COUNT(*) FROM jobs WHERE kb = ? "
+            "AND status IN ('queued', 'running')",
+            (kb_name,),
+        ).fetchone()
+    return row[0]
+
+
 def _chunk_page_count(params: dict) -> int | None:
     """Pages covered by a job's pages spec ("7-26" → 20, "9" → 1)."""
     pages = params.get("pages")

@@ -24,6 +24,10 @@ INBOX_DIR = Path(os.environ.get("OPENKB_WEBUI_INBOX", _BASE / "inbox"))
 # see state_dir() below).
 KB_ROOT = Path(os.environ.get("OPENKB_WEBUI_KB_ROOT", _BASE / "kbs"))
 
+# Retired KBs are MOVED here (never deleted) — outside KB_ROOT so the
+# discovery scan stops seeing them; restore = move the dir back.
+RETIRED_DIR = Path(os.environ.get("OPENKB_WEBUI_RETIRED_DIR", _BASE / "kbs-retired"))
+
 # Per-KB state dir name. STATE_DIR_NAME is what `okforge init` scaffolds as
 # of engine v0.8.0; LEGACY_STATE_DIR_NAME is what a not-yet-migrated KB
 # still has (`okforge migrate` moves it) — mirrors okforge.config's own

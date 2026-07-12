@@ -320,9 +320,31 @@ function selectKb(name) {
     endpoint ${esc(k.endpoint || k.endpoint_url || '?')} ·
     ${k.docs} docs · ${k.concepts} concepts · ${k.entities} entities ·
     ${k.images} images · ${k.raw_files} raw files</span>`;
+  box.append(el('div', {class: 'row'},
+    el('button', {class: 'small danger', text: 'Retire KB…',
+      title: 'Move this KB out of the active set into kbs-retired/ — ' +
+        'nothing is deleted, restore = move the directory back. ' +
+        'Refused while the KB has queued/running jobs.',
+      onclick: () => retireKb().catch(e => toast(e.message))})));
   updateStageGates();
   renderVerify();
   refreshJobs().catch(() => {});  // re-apply the per-KB job filter
+}
+
+async function retireKb() {
+  if (!state.kb) return;
+  const name = state.kb.name;
+  const typed = prompt(
+    `Retire KB "${name}"?\n\nIt moves to kbs-retired/ — nothing is deleted, ` +
+    'and restoring is just moving the directory back.\n\n' +
+    'Type the KB name to confirm:');
+  if (typed === null) return;
+  if (typed.trim() !== name) { toast('name did not match — KB not retired'); return; }
+  const r = await api(`/api/kbs/${encodeURIComponent(name)}`, {method: 'DELETE'});
+  toast(`KB ${name} retired to ${r.retired_to}`, 'info');
+  await loadKbs();       // rebuilds the dropdown; the retired name is gone
+  selectKb('');          // loadKbs skips selectKb when the selection vanished
+  refreshJobs().catch(() => {});
 }
 
 async function createKb() {

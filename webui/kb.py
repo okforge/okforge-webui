@@ -10,7 +10,9 @@ prompt is the API-key one, satisfied by a blank line (PLAN.md's
 """
 
 import re
+import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import yaml
@@ -223,3 +225,45 @@ def _read_default_kb() -> str | None:
     except yaml.YAMLError:
         return None
     return gc.get("default_kb")
+
+
+def _scrub_global_registry(kb_path: str) -> None:
+    """Drop a retired KB from the engine's global config: its known_kbs
+    entry, and default_kb when it points there — a dangling default
+    would send the next bare `openkb add` into a moved directory."""
+    for gc_path in (Path.home() / ".config" / "okforge" / "global.yaml",
+                    Path.home() / ".config" / "openkb" / "global.yaml"):
+        if not gc_path.is_file():
+            continue
+        try:
+            gc = yaml.safe_load(gc_path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            continue
+        changed = False
+        if gc.get("default_kb") == kb_path:
+            gc.pop("default_kb")
+            changed = True
+        known = gc.get("known_kbs")
+        if isinstance(known, list) and kb_path in known:
+            gc["known_kbs"] = [p for p in known if p != kb_path]
+            changed = True
+        if changed:
+            gc_path.write_text(yaml.safe_dump(gc), encoding="utf-8")
+
+
+def retire_kb(name: str) -> dict:
+    """Archive-first removal (ROADMAP P11): MOVE the KB dir to
+    RETIRED_DIR/<name>-<date>/ — no data is deleted, restore = move it
+    back. The caller (API layer) is responsible for refusing while the
+    KB has queued/running jobs."""
+    kb_dir = resolve_kb(name)
+    config.RETIRED_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d")
+    dest = config.RETIRED_DIR / f"{name}-{stamp}"
+    n = 1
+    while dest.exists():
+        n += 1
+        dest = config.RETIRED_DIR / f"{name}-{stamp}-{n}"
+    shutil.move(str(kb_dir), str(dest))
+    _scrub_global_registry(str(kb_dir))
+    return {"name": name, "retired_to": str(dest)}

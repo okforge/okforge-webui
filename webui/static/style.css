@@ -93,6 +93,8 @@ button:hover { border-color: var(--accent); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.primary:hover { filter: brightness(1.1); }
 button.small { padding: .15rem .45rem; }
+button.danger { color: var(--err); }
+button.danger:hover { border-color: var(--err); }
 button:disabled { opacity: .5; cursor: default; }
 
 .result {

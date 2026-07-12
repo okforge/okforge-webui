@@ -31,6 +31,17 @@ request; nothing is "installed" beyond being in that directory.
 - **CLI**: `mkdir <Subject> && cd <Subject> && okforge init -m <model> -l en`
   (or `init --json` for scripts — fully non-interactive).
 
+## Retire
+
+"Retire KB…" in the stage-3 KB info box (typed-name confirmation), or
+`DELETE /api/kbs/<name>`. Archive-first: the KB directory **moves** to
+`<base>/kbs-retired/<name>-<date>/` — nothing is deleted, git history
+and snapshots travel with it — and its entries leave the engine's
+global registry (`known_kbs`, and `default_kb` if it pointed there).
+Refused while the KB has queued/running jobs. Restore = move the
+directory back under `kbs/`. True deletion stays a deliberate manual
+`rm -rf` of the retired copy.
+
 ## Copy between machines
 
 From the source machine (trailing slashes matter):
