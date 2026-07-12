@@ -229,6 +229,7 @@ async function runPilot(pagesOverride) {
     pages: pages,
     figures: $('#pilot-figures').checked,
     tables: $('#pilot-tables').checked,
+    prompt_extra: $('#pilot-prompt-extra').value.trim() || null,
     endpoint: $('#endpoint').value,
   }});
   state.pilotJobId = job.id;
@@ -407,6 +408,7 @@ async function startRun() {
       translate: $('#run-translate').checked,
       src_lang: state.probe.language_guess || null,
       chunk_pages: parseInt($('#chunk-pages').value, 10) || 20,
+      prompt_extra: $('#run-prompt-extra').value.trim() || null,
     }});
   }
   toast(`queued job #${job.id} (${job.type})`, 'info');
@@ -425,6 +427,7 @@ async function startReocr() {
     pages: String(page),
     figures: $('#run-figures').checked,
     tables: $('#reocr-tables').checked,
+    prompt_extra: $('#run-prompt-extra').value.trim() || null,
     translate: $('#run-translate').checked,
     src_lang: state.probe.language_guess || null,
   }});
@@ -1009,6 +1012,10 @@ function init() {
   // run; unticking the run box must NOT reach back into the pilot.
   $('#pilot-figures').onchange = e => {
     if (e.target.checked) $('#run-figures').checked = true;
+  };
+  // Same one-way carry for OCR prompt hints refined during the pilot.
+  $('#pilot-prompt-extra').onchange = e => {
+    if (e.target.value.trim()) $('#run-prompt-extra').value = e.target.value.trim();
   };
   $('#upload-btn').onclick = () => uploadPdf().catch(e => toast(e.message));
   $('#probe-btn').onclick = () => runProbe().catch(e => toast(e.message));

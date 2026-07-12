@@ -134,6 +134,7 @@ class JobCreate(BaseModel):
     text_layer: bool = False  # full jobs: pymupdf extraction instead of OCR
     endpoint: str | None = None
     chunk_pages: int = config.DEFAULT_CHUNK_PAGES
+    prompt_extra: str | None = None  # free text appended to the OCR prompt
 
 
 def _validate_job(req: JobCreate) -> dict:
@@ -142,6 +143,9 @@ def _validate_job(req: JobCreate) -> dict:
         raise ValueError(f"unknown job type: {req.type!r}")
     if req.src_lang is not None and not re.match(r"^[a-z]{2}$", req.src_lang):
         raise ValueError(f"bad src_lang: {req.src_lang!r}")
+    prompt_extra = (req.prompt_extra or "").strip() or None
+    if prompt_extra and len(prompt_extra) > 500:
+        raise ValueError("prompt_extra too long (max 500 chars)")
     params = {
         "pdf": None,
         "path": None,
@@ -153,6 +157,7 @@ def _validate_job(req: JobCreate) -> dict:
         "text_layer": req.text_layer,
         "endpoint": req.endpoint,
         "chunk_pages": req.chunk_pages,
+        "prompt_extra": prompt_extra,
     }
     if req.type in {"pilot", "ocr", "translate", "full", "reocr", "extract", "recompile"}:
         if not req.pdf:

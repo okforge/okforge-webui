@@ -104,6 +104,12 @@ llm_extra_body:
 - **Re-ingest chunk** (same fold): after re-OCRing page(s), one job does
   engine `remove --keep-raw --yes` + re-add of the chunk containing the
   given page — the wiki refresh step, no CLI needed.
+- **OCR hints** (stages 2 and 4): free-text instructions appended to the
+  OCR prompt (`--prompt-extra`) for documents the standard prompt
+  mishandles — "ignore marginalia", "columns read right-to-left".
+  Refine the wording against a pilot page first; the pilot's hint
+  carries into the run field one-way. Applies to pilot, run, and
+  re-OCR jobs; ignored in text-layer mode (no OCR happens).
 - **Duplicate runs**: Start run warns if a full job for the same pdf+kb
   is already active; full-job rows show "N/M chunks ingested".
 

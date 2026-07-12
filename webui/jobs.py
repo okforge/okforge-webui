@@ -331,7 +331,7 @@ def _pages_spec(params: dict) -> str | None:
 
 
 def _ocr_cmd(pdf: Path, out_md: Path, pages: str | None, figures: bool,
-             tables: bool = False) -> list[str]:
+             tables: bool = False, prompt_extra: str | None = None) -> list[str]:
     cmd = [str(config.OCR_BIN), str(pdf), str(out_md)]
     if pages:
         cmd += ["--pages", pages]
@@ -341,6 +341,10 @@ def _ocr_cmd(pdf: Path, out_md: Path, pages: str | None, figures: bool,
         # Table mode: reasoning on + table-reconstruction prompt — for
         # pages whose complex tables the fast path mangles.
         cmd += ["--think", "--tables"]
+    if prompt_extra:
+        # Per-document escape hatch: free-text instructions appended to
+        # the OCR prompt ("ignore marginalia", "columns read right-to-left").
+        cmd += ["--prompt-extra", prompt_extra]
     return cmd
 
 
@@ -355,7 +359,8 @@ def _run_pilot(job: dict) -> None:
     out_dir = pilot_dir(job["id"])
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = _ocr_cmd(pdf, out_dir / "pilot.md", pages, bool(params.get("figures")),
-                   tables=bool(params.get("tables")))
+                   tables=bool(params.get("tables")),
+                   prompt_extra=params.get("prompt_extra"))
     rc = _run_logged(job["id"], cmd, cwd=out_dir, env_extra=_endpoint_env(params))
     if rc != 0:
         raise RuntimeError(f"okforge-vision-ocr exited {rc}")
@@ -404,7 +409,8 @@ def _run_ocr(job: dict) -> None:
     pages = _pages_spec(params)
     out_md = ocr_out_md(kb_dir, pdf, pages, bool(params.get("translate")))
     out_md.parent.mkdir(exist_ok=True)
-    cmd = _ocr_cmd(pdf, out_md, pages, bool(params.get("figures")))
+    cmd = _ocr_cmd(pdf, out_md, pages, bool(params.get("figures")),
+                   prompt_extra=params.get("prompt_extra"))
     rc = _run_logged(job["id"], cmd, cwd=kb_dir,
                      env_extra=_kb_vision_env(kb_dir))
     if rc != 0:
@@ -540,7 +546,8 @@ def _run_reocr(job: dict) -> None:
         # (<chunk_stem>_images/pN_imgM.jpg), so spliced content resolves.
         tmp_md = tmp / f"{chunk_stem}.md"
         cmd = _ocr_cmd(pdf, tmp_md, str(page), bool(params.get("figures")),
-                       tables=bool(params.get("tables")))
+                       tables=bool(params.get("tables")),
+                       prompt_extra=params.get("prompt_extra"))
         rc = _run_logged(job["id"], cmd, cwd=kb_dir,
                          env_extra=_kb_vision_env(kb_dir))
         if rc != 0:
@@ -782,7 +789,8 @@ def _expand_full(job: dict) -> None:
                 "translate": translate, "src_lang": params.get("src_lang"),
                 "text_layer": text_layer,
                 "endpoint": params.get("endpoint"),
-                "chunk_pages": chunk_pages}
+                "chunk_pages": chunk_pages,
+                "prompt_extra": params.get("prompt_extra")}
         for step in steps:
             child_params = dict(base)
             if step == "add":

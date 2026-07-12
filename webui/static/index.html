@@ -48,6 +48,9 @@
       <span title="Also crop line drawings and engravings, not just photos">--figures</span></label>
     <label class="check"><input type="checkbox" id="pilot-tables">
       <span title="Complex tables: model reasoning on + table-reconstruction prompt. Much slower — use per page">table mode</span></label>
+    <label>OCR hints <input type="text" id="pilot-prompt-extra" size="22"
+      placeholder="optional, e.g. ignore marginalia"
+      title="Free-text instructions appended to the OCR prompt (--prompt-extra) — for documents the standard prompt mishandles"></label>
     <button id="pilot-btn" class="primary">Run pilot</button>
     <span id="pilot-status" class="muted"></span>
   </div>
@@ -82,6 +85,9 @@
     <label class="check"><input type="checkbox" id="run-translate"> translate to English</label>
     <label class="check"><input type="checkbox" id="run-figures">
       <span title="Also crop line drawings and engravings, not just photos">extract figures &amp; line drawings (--figures)</span></label>
+    <label>OCR hints <input type="text" id="run-prompt-extra" size="22"
+      placeholder="optional"
+      title="Free-text instructions appended to the OCR prompt (--prompt-extra); ignored in text-layer mode"></label>
     <label>From page <input type="number" id="run-from" value="1" min="1"></label>
     <label>to <input type="number" id="run-to" value="1" min="1"></label>
     <label>Pages per chunk <input type="number" id="chunk-pages" value="20" min="1" max="200" size="4"></label>
