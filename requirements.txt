@@ -21,7 +21,7 @@ mcp==1.27.1
 # repo-local qwen_page_ocr.py / translate_pages.py, published from
 # https://github.com/okforge/okforge-vision-ocr. The webui invokes its
 # console scripts okforge-vision-ocr / okforge-translate-pages.
-okforge-vision-ocr==0.1.1
+okforge-vision-ocr==0.2.0
 
 # probe (webui PDF inspection)
 PyMuPDF==1.27.2.3
