@@ -717,6 +717,7 @@ function renderVerify() {
   const link = $('#site-link');
   link.classList.toggle('hidden', !k.published);
   link.href = `/api/kb/${encodeURIComponent(k.name)}/site/`;
+  $('#raw-link').href = `/api/kb/${encodeURIComponent(k.name)}/raw`;
   $('#copy-publish-cmd').classList.toggle('hidden', !k.published);
   $('#site-status').textContent = k.published
     ? '' : 'no site built yet';
