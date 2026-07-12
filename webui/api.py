@@ -12,10 +12,12 @@ import contextlib
 import json
 import re
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               PlainTextResponse)
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -422,16 +424,54 @@ def get_wiki(name: str, rel_path: str = ""):
 _RAW_BINARY_TYPES = dict(_WIKI_IMAGE_TYPES, **{".pdf": "application/pdf"})
 
 
+def _raw_index_html(name: str, rel_path: str, files: list[dict]) -> str:
+    """Browser view of a raw/ listing: download links per file plus the
+    one-click concatenated sources.md. Pipelines never see this — they
+    get JSON (content negotiation in get_raw)."""
+    import html as _html
+
+    kb_url = f"/api/kb/{quote(name)}"
+    rows = []
+    for f in files:
+        href = f"{kb_url}/raw/" + "/".join(quote(s) for s in f["path"].split("/"))
+        is_img = Path(f["path"]).suffix.lower() in _WIKI_IMAGE_TYPES
+        rows.append(
+            f'<tr><td><a href="{href}"{"" if is_img else " download"}>'
+            f'{_html.escape(f["path"])}</a></td>'
+            f'<td class="n">{f["size"]:,}</td></tr>'
+        )
+    where = _html.escape(f"{name}/raw/{rel_path}".rstrip("/"))
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>{where}</title><style>
+body {{ font: 15px/1.5 system-ui, sans-serif; margin: 2rem auto; max-width: 50rem; padding: 0 1rem; }}
+table {{ border-collapse: collapse; width: 100%; font-size: .9rem; }}
+td {{ padding: .25rem .6rem; border-bottom: 1px solid #ddd; }}
+td.n {{ text-align: right; color: #777; white-space: nowrap; }}
+.note {{ color: #777; font-size: .85rem; }}
+</style></head><body>
+<h1>{where}</h1>
+<p class="note">Pristine ingested sources (OCR'd markdown chunks, page JSON,
+image crops, archived PDFs). Click to download; images open for viewing.
+Pipelines should request this URL with <code>Accept: application/json</code>
+(curl's default) for a machine-readable listing.</p>
+<p><a href="{kb_url}/sources.md"><b>Download all ingested chunks as one
+markdown file</b></a> <span class="note">(page order — for re-chunking in a
+vector RAG)</span></p>
+<table>{"".join(rows)}</table>
+</body></html>"""
+
+
 @app.get("/api/kb/{name}/raw")
 @app.get("/api/kb/{name}/raw/{rel_path:path}")
-def get_raw(name: str, rel_path: str = ""):
+def get_raw(name: str, request: Request, rel_path: str = ""):
     """Read-only access to raw/ — the pristine ingested sources
     (<stem>_pN_M.md chunks, .pages.json page arrays, _images/ crops,
     archived PDFs) so external pipelines can pull them (ROADMAP P12:
     feed a separate RAG). Directories return a flat RECURSIVE listing
     with size + mtime — one call enumerates everything a pipeline needs
-    to sync; files are served directly. Hidden entries (.reocr_job*
-    scratch dirs) are skipped."""
+    to sync — as JSON, or as a human download page when the client
+    prefers text/html (a browser). Files are served directly. Hidden
+    entries (.reocr_job* scratch dirs) are skipped."""
     try:
         kb_dir = kb.resolve_kb(name)
     except ValueError as e:
@@ -455,6 +495,8 @@ def get_raw(name: str, rel_path: str = ""):
             st = p.stat()
             files.append({"path": rel.as_posix(),
                           "size": st.st_size, "mtime": st.st_mtime})
+        if "text/html" in request.headers.get("accept", ""):
+            return HTMLResponse(_raw_index_html(name, rel_path, files))
         return {"kb": name, "path": rel_path, "files": files}
     suffix = target.suffix.lower()
     if suffix in _RAW_BINARY_TYPES:
@@ -462,6 +504,41 @@ def get_raw(name: str, rel_path: str = ""):
     if suffix in _WIKI_TEXT_EXTS:
         return PlainTextResponse(target.read_text(encoding="utf-8"))
     raise HTTPException(404, f"unsupported file type: {rel_path}")
+
+
+@app.get("/api/kb/{name}/sources.md")
+def get_sources_md(name: str):
+    """All INGESTED chunks concatenated in page order, one markdown
+    download — for RAG systems that re-chunk anyway. Built from the
+    engine's own indexed-doc list, so source-language variants (_src,
+    legacy _ca/_es), pilots, and never-added leftovers are excluded."""
+    try:
+        kb_dir = kb.resolve_kb(name)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    try:
+        stems = jobs._indexed_stems(kb_dir)
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
+
+    def page_key(stem: str):
+        m = re.search(r"_p(\d+)", stem)
+        return (0, int(m.group(1)), stem) if m else (1, 0, stem.lower())
+
+    parts = []
+    for stem in sorted(stems, key=page_key):
+        p = kb_dir / "raw" / f"{stem}.md"
+        if p.is_file():
+            parts.append(f"<!-- source: {stem}.md -->\n\n"
+                         + p.read_text(encoding="utf-8").strip())
+    if not parts:
+        raise HTTPException(404, f"{name} has no ingested raw sources")
+    return PlainTextResponse(
+        "\n\n".join(parts) + "\n",
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition":
+                 f'attachment; filename="{name}-sources.md"'},
+    )
 
 
 @app.get("/api/kb/{name}/search")

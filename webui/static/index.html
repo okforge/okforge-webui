@@ -135,7 +135,9 @@
         title="Build this KB's wiki into a static Quartz site under /opt/okforge/sites/; making it public stays a manual rsync (command in the job log)">Publish site</button>
       <a id="site-link" class="hidden" target="_blank" rel="noopener">view published site</a>
       <a id="raw-link" target="_blank" rel="noopener" class="muted"
-        title="The pristine ingested sources (raw/ — OCR'd chunks, page JSON, image crops, archived PDFs) over the read-only API; the listing is JSON, made for feeding external pipelines like a separate RAG">raw sources</a>
+        title="Browse & download the pristine ingested sources (raw/ — OCR'd chunks, page JSON, image crops, archived PDFs); pipelines get the same URL as JSON">raw sources</a>
+      <a id="sources-md-link" target="_blank" rel="noopener" class="muted"
+        title="All ingested chunks concatenated in page order as one markdown download — for re-chunking in a vector RAG">all sources (.md)</a>
       <button id="copy-publish-cmd" class="small hidden"
         title="Copy the rsync command that pushes this site to the public host">copy go-public cmd</button>
       <span id="site-status" class="muted"></span>

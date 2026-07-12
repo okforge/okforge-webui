@@ -57,7 +57,17 @@ curl http://<host>/api/kb/<name>/raw
 # Fetch any listed file (md/json as text, images/PDF as binary)
 curl -O http://<host>/api/kb/<name>/raw/<stem>_p1_20.md
 curl http://<host>/api/kb/<name>/raw/<stem>_p1_20.pages.json
+
+# All INGESTED chunks concatenated in page order, one markdown file —
+# for RAG systems that re-chunk anyway. Source-language variants,
+# pilots, and never-added leftovers are excluded automatically.
+curl -O http://<host>/api/kb/<name>/sources.md
 ```
+
+The same `/raw` URL opened in a **browser** renders a download page
+instead of JSON (content negotiation on `Accept: text/html`) — per-file
+download links plus the one-click `sources.md`. Stage 5 links to both
+("raw sources" / "all sources (.md)") for the selected KB.
 
 Prefer these over `wiki/sources/` when fidelity matters: the wiki
 copies have image references rewritten at ingest. Hidden scratch
