@@ -42,6 +42,27 @@ Refused while the KB has queued/running jobs. Restore = move the
 directory back under `kbs/`. True deletion stays a deliberate manual
 `rm -rf` of the retired copy.
 
+## Pull raw sources (external RAG / pipelines)
+
+`raw/` holds the pristine ingested artifacts — the `<stem>_pN_M.md`
+chunks exactly as OCR'd, their `.pages.json` page arrays, the
+`_images/` crops, and any archived source PDFs. A read-only API serves
+them so an external pipeline (e.g. a separate RAG system) can sync a
+KB's sources without filesystem access:
+
+```bash
+# One call enumerates everything: flat recursive listing, size + mtime
+curl http://<host>/api/kb/<name>/raw
+
+# Fetch any listed file (md/json as text, images/PDF as binary)
+curl -O http://<host>/api/kb/<name>/raw/<stem>_p1_20.md
+curl http://<host>/api/kb/<name>/raw/<stem>_p1_20.pages.json
+```
+
+Prefer these over `wiki/sources/` when fidelity matters: the wiki
+copies have image references rewritten at ingest. Hidden scratch
+entries (`.reocr_job*`) never appear in listings.
+
 ## Copy between machines
 
 From the source machine (trailing slashes matter):

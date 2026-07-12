@@ -418,6 +418,52 @@ def get_wiki(name: str, rel_path: str = ""):
     raise HTTPException(404, f"unsupported file type: {rel_path}")
 
 
+# raw/ additionally holds the original PDFs the engine archived at add time.
+_RAW_BINARY_TYPES = dict(_WIKI_IMAGE_TYPES, **{".pdf": "application/pdf"})
+
+
+@app.get("/api/kb/{name}/raw")
+@app.get("/api/kb/{name}/raw/{rel_path:path}")
+def get_raw(name: str, rel_path: str = ""):
+    """Read-only access to raw/ — the pristine ingested sources
+    (<stem>_pN_M.md chunks, .pages.json page arrays, _images/ crops,
+    archived PDFs) so external pipelines can pull them (ROADMAP P12:
+    feed a separate RAG). Directories return a flat RECURSIVE listing
+    with size + mtime — one call enumerates everything a pipeline needs
+    to sync; files are served directly. Hidden entries (.reocr_job*
+    scratch dirs) are skipped."""
+    try:
+        kb_dir = kb.resolve_kb(name)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    base = (kb_dir / "raw").resolve()
+    if not base.is_dir():
+        raise HTTPException(404, f"{name} has no raw/ yet")
+    target = (base / rel_path).resolve() if rel_path else base
+    if not target.is_relative_to(base) or not target.exists():
+        raise HTTPException(404, f"no such raw path: {rel_path}")
+    if target.is_dir():
+        files = []
+        for p in sorted(target.rglob("*"), key=lambda p: p.as_posix().lower()):
+            rel = p.relative_to(base)
+            if any(part.startswith(".") for part in rel.parts):
+                continue
+            suffix = p.suffix.lower()
+            if not p.is_file() or (suffix not in _WIKI_TEXT_EXTS
+                                   and suffix not in _RAW_BINARY_TYPES):
+                continue
+            st = p.stat()
+            files.append({"path": rel.as_posix(),
+                          "size": st.st_size, "mtime": st.st_mtime})
+        return {"kb": name, "path": rel_path, "files": files}
+    suffix = target.suffix.lower()
+    if suffix in _RAW_BINARY_TYPES:
+        return FileResponse(target, media_type=_RAW_BINARY_TYPES[suffix])
+    if suffix in _WIKI_TEXT_EXTS:
+        return PlainTextResponse(target.read_text(encoding="utf-8"))
+    raise HTTPException(404, f"unsupported file type: {rel_path}")
+
+
 @app.get("/api/kb/{name}/search")
 def kb_search(name: str, q: str, limit: int = 20):
     """Fast lexical wiki search (no LLM) — same engine as the MCP search
