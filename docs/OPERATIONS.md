@@ -300,6 +300,44 @@ default; a bad reindex is one `git reset --hard` away (pre-ingest
 snapshots). Moving a concept file to another topic dir by hand is fine
 — everything follows the files.
 
+## Ingest cost at collection scale (measured)
+
+One calibration datapoint to set expectations before committing to a
+multi-day run: 364 hour-long, news-dense transcript documents (a full
+year of a daily show) into one KB with `topic_tree: true`, on a single
+llama.cpp host (2 parallel slots, 262k context each) serving a 27B
+Q5 model with thinking off. Final wiki: 364 summaries, 812 concepts in
+14 topics, 2,123 entities, 40 MB. Total: **~46 h wall time**, ~26 LLM
+calls per document, zero failed adds.
+
+- **Per-add cost grows with the wiki, not the document.** 2.8 min/doc
+  for the first 30 docs → ~6 min/doc by doc 150 → a **~9 min/doc
+  plateau** past doc 200. Budget a long run at the late rate, not the
+  early one.
+- **The dominant cost is entity-page rewrites, not the planning
+  prompt.** A recurring entity's page is rewritten in full on every
+  mention, and hot pages grow with the corpus (the top page ended at
+  140 KB), so rewrite outputs grow too: median entity update 1.2k
+  tokens out, p95 17k. Output tokens are the slow direction on local
+  hosts — this is where the 9 min/doc goes. Entity-dense material
+  averaged ~6 new entities per document.
+- **Prompt growth is real but survivable**: the per-add planning prompt
+  embeds every concept and entity brief; it grew ~200 tokens/doc and
+  ended at ~91k tokens. Fine inside a 262k slot — but size the serving
+  context before the run, and note `wiki/index.md` (the query agent's
+  first read) ended at ~425 KB.
+- **Prefix caching is what makes this affordable**: 84% of ~312M input
+  tokens were cache hits (steady-state adds run 97–99% cached). On a
+  hosted API, check the provider's prompt-caching support first —
+  uncached, the same run bills over 1M input tokens per document.
+- **Reindex cadence**: first `reindex` once ~30 docs are in, again at
+  the end. The final one here took 9 minutes: 648 concepts clustered,
+  ~9k markdown links retargeted.
+- **Interruptions are cheap**: adds hash-skip known files, so a killed
+  run resumes by re-running the same loop (the replay over 300 done
+  docs takes minutes), and an interrupted add rolls back its journal
+  on the next start.
+
 ## Troubleshooting
 
 - **Job hangs mid-LLM-call, GPU busy but nothing returns** (or hangs right
@@ -312,6 +350,19 @@ snapshots). Moving a concept file to another topic dir by hand is fine
 - **Adds suddenly much slower**: check thinking got re-enabled (missing
   `llm_extra_body` block in a new KB) or the model was reloaded with a
   different preset (`curl -s http://<llm-host>:8080/props`).
+- **One add takes 5× normal and the log shows hundreds of entities
+  planned**: a runaway concepts-plan — the model degenerated into a
+  10k+-token plan requesting hundreds of entities (normal: ~10). The
+  add still "succeeds", but it writes a pile of vague junk entity pages
+  ("progressive-stuff") that bloat every later planning prompt. Prune
+  them afterwards (delete the junk pages, `reindex`); watching per-doc
+  wall time in the ingest log catches it early.
+- **A hung LLM call outlives its timeout**: the client timeout only
+  bounds a *responsive* server. A wedged llama.cpp slot that stops
+  responding mid-request holds the call until TCP gives up (~30 min
+  observed, vs a 600 s configured timeout). Same fix as the first
+  bullet: force-unload the model. Entity generations lost this way are
+  logged as a WARN and the add completes without them.
 - **Backend up, UI stale**: hard-refresh. On Apache deployments also
   remember static files are served from the docroot, not the repo — an
   un-rsynced frontend change never reaches the browser (standalone mode

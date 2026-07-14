@@ -193,6 +193,16 @@ llm_extra_body:
 
 KBs created through the web UI get this automatically.
 
+One more expectation worth setting for large collections: ingest cost
+scales with the size of the *wiki*, not the document being added —
+recurring concept and entity pages are rewritten on every mention — so
+a document that takes 3 minutes into a fresh KB takes ~9 into the same
+KB 300 documents later. llama.cpp's prefix cache absorbs most of the
+growth (84% of input tokens were cache hits over a measured
+364-document run); see
+[`docs/OPERATIONS.md`](docs/OPERATIONS.md#ingest-cost-at-collection-scale-measured)
+for the measured figures before planning a multi-day run.
+
 ## Docs
 
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — operating KBs day to day:
