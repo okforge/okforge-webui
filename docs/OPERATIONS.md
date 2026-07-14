@@ -354,9 +354,13 @@ calls per document, zero failed adds.
   planned**: a runaway concepts-plan — the model degenerated into a
   10k+-token plan requesting hundreds of entities (normal: ~10). The
   add still "succeeds", but it writes a pile of vague junk entity pages
-  ("progressive-stuff") that bloat every later planning prompt. Prune
-  them afterwards (delete the junk pages, `reindex`); watching per-doc
-  wall time in the ingest log catches it early.
+  ("progressive-stuff") that bloat every later planning prompt. Repair:
+  `okforge remove <doc> --keep-raw` then re-add the same file — remove
+  deletes every page whose *only* source was that doc, merely drops the
+  doc from co-sourced pages, and lint-fixes dangling wikilinks; the
+  re-add compiles a fresh (normally sane) plan. Preview with
+  `--dry-run` first; watching per-doc wall time in the ingest log
+  catches runaways early.
 - **A hung LLM call outlives its timeout**: the client timeout only
   bounds a *responsive* server. A wedged llama.cpp slot that stops
   responding mid-request holds the call until TCP gives up (~30 min
