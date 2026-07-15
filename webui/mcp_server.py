@@ -26,16 +26,22 @@ from . import config, jobs, kb
 mcp = FastMCP(
     "okforge",
     instructions=(
-        "Query Dana's local okforge knowledge bases (one per subject, built "
-        "from scanned books via OCR). Workflow: call list_projects once, "
-        "pick the single project whose 'about' text best matches the "
-        "question, then search(project, query) for fact lookups (fast, no "
-        "LLM) + read_wiki_page for full pages; use ask(project, question) "
-        "only when you need synthesis — each ask runs a full retrieval-and-"
-        "generation pass on a local LLM and takes 1-3 minutes, so NEVER "
-        "send the same question to several projects. If no project is an "
-        "obvious match, ask the user which one they mean instead of "
-        "guessing. Answers cite source pages as (p. N)."
+        "Query local okforge knowledge bases — one per subject, each a "
+        "citation-backed wiki compiled from source documents (books, "
+        "papers, video transcripts). Workflow: call list_projects once and "
+        "pick the ONE project whose 'about' text matches the question; if "
+        "none is an obvious match, ask the user which they mean instead of "
+        "guessing. Then search(project, query) for fact lookups (lexical "
+        "substring, sub-second, no LLM) and read_wiki_page to read each "
+        "hit's page before citing it; use ask(project, question) only for "
+        "synthesis across many documents — each ask runs a full retrieval-"
+        "and-generation pass on a local LLM (1-3 minutes), so NEVER send "
+        "the same question to several projects; to compare KBs, query them "
+        "one at a time. Answers cite source pages as (p. N); in video-"
+        "transcript KBs page N is the N-th 5-minute block of the video. "
+        "read_wiki_page(project, 'AGENTS.md') returns a KB's schema "
+        "documentation; the MCP prompt 'kb-search-guide' has the full "
+        "recommended search strategy."
     ),
     # mounted as a sub-app at /mcp, so serve at the mount root
     streamable_http_path="/",
@@ -51,6 +57,34 @@ mcp = FastMCP(
 )
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+# Canonical client guidance lives in docs/MCP_CLIENT_PROMPT.md (the
+# fenced block); served here as an MCP prompt so capable clients can
+# pull it instead of pasting it by hand.
+_CLIENT_PROMPT_DOC = config.REPO_DIR / "docs" / "MCP_CLIENT_PROMPT.md"
+
+
+def _client_prompt_text() -> str:
+    """The recommended client prompt: the doc's one fenced block."""
+    doc = _CLIENT_PROMPT_DOC.read_text(encoding="utf-8")
+    m = re.search(r"```text\n(.*?)\n```", doc, flags=re.DOTALL)
+    if not m:
+        raise RuntimeError(f"no ```text block in {_CLIENT_PROMPT_DOC}")
+    return m.group(1)
+
+
+@mcp.prompt(
+    name="kb-search-guide",
+    title="How to search these knowledge bases",
+    description=(
+        "Recommended strategy for querying the okforge KBs through this "
+        "server's tools: project selection, cheap-path-first search, wiki "
+        "layout, when ask() is justified, and citation conventions. Inject "
+        "as system-level guidance for any model using these tools."
+    ),
+)
+def kb_search_guide() -> str:
+    return _client_prompt_text()
 
 # `openkb query` runs tree search + answer generation; a long one on the
 # busy single-slot host can take a few minutes.

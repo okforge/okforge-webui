@@ -33,6 +33,9 @@ transcription and image crops before committing) → **KB setup** →
 - **MCP server** at `/mcp` (streamable HTTP): `list_projects`,
   `project_status`, `ask`, `search`, `read_wiki_page`. Connect any MCP
   client, e.g. `claude mcp add --transport http okforge http://<host>/mcp`.
+  Clients that don't surface MCP server instructions (Open-WebUI and
+  other OpenAPI-bridged clients) should get the recommended system
+  prompt from [`docs/MCP_CLIENT_PROMPT.md`](docs/MCP_CLIENT_PROMPT.md).
 - **Static-site publishing** per KB via [Quartz](https://quartz.jzhao.xyz/)
   — full-text search, graph view, backlinks — one button, then a printed
   rsync command to go public.
