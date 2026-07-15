@@ -136,6 +136,23 @@ before any HTML exists.
 
 ## Roadmap
 
+- **Chunk by natural document divisions, not fixed page counts.**
+  Today a run splits a PDF every N pages, which can cut mid-chapter —
+  a summary page then covers a fragment of one section plus the start
+  of the next, and cross-references land awkwardly. The job side
+  needs nothing: chunks are already arbitrary page ranges, expanded at
+  enqueue time. What's missing is a *planner*: probe could read the
+  PDF outline/bookmarks (pymupdf exposes it) and offer "chunk by
+  outline level 1/2" in stage 4, producing variable-size ranges with
+  the section title carried into the chunk's raw filename and summary
+  heading. Fallbacks where there's no outline: heading detection in
+  pilot OCR output, or a hand-entered list of ranges. Guard rails:
+  cap a section at the current chunk_pages max (split oversize
+  chapters) and merge tiny front-matter sections. Same idea applies
+  to transcripts (YouTube chapters instead of 5-minute blocks) —
+  but the page↔timestamp citation convention depends on fixed blocks,
+  so transcripts need more thought before changing.
+
 - **Auto-generate the project description** (the MCP 'about' line).
   Today only a manual `okforge describe "<text>"` sets it; a KB
   without one falls back to concatenated document one-liners from
