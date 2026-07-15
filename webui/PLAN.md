@@ -133,3 +133,18 @@ Apache basic-auth if it ever faces a wider network.
 
 Each step ends runnable; steps 1–2 give a usable curl-driven API even
 before any HTML exists.
+
+## Roadmap
+
+- **Auto-generate the project description** (the MCP 'about' line).
+  Today only a manual `okforge describe "<text>"` sets it; a KB
+  without one falls back to concatenated document one-liners from
+  `index.md`, which can surface junk ("Blank page with no
+  transcribable content") and misleads MCP clients picking a project
+  by 'about' text. Preferred hook: when an add job completes and the
+  KB has **no** curated description, run one LLM call over the
+  `index.md` document list to draft a one-liner and set it — never
+  overwrite a hand-curated line. Alternative/companion: seed a
+  placeholder description at KB creation so the raw fallback never
+  shows. See `docs/MCP_CLIENT_PROMPT.md` for why the 'about' line
+  matters.
