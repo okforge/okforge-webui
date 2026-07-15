@@ -222,8 +222,8 @@ def post_jobs(req: JobCreate):
 
 
 @app.get("/api/jobs")
-def get_jobs(limit: int = 100):
-    return {"jobs": jobs.list_jobs(limit=limit)}
+def get_jobs(limit: int = 100, active: bool = False):
+    return {"jobs": jobs.list_jobs(limit=limit, active=active)}
 
 
 @app.get("/api/jobs/{job_id}")

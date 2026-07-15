@@ -138,11 +138,16 @@ def get_job(job_id: int) -> dict | None:
     return _annotate(_row_to_dict(row)) if row else None
 
 
-def list_jobs(limit: int = 100) -> list[dict]:
+def list_jobs(limit: int = 100, active: bool = False) -> list[dict]:
+    """Newest jobs first. active=True returns only queued/running rows —
+    the set duplicate-run guards and status views need, immune to a busy
+    run flooding the newest-N window (a 1-page-chunk book is ~400 rows)."""
+    q = "SELECT * FROM jobs "
+    if active:
+        q += "WHERE status IN ('queued', 'running') "
+    q += "ORDER BY id DESC LIMIT ?"
     with _db_lock, _conn() as c:
-        rows = c.execute(
-            "SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (limit,)
-        ).fetchall()
+        rows = c.execute(q, (limit,)).fetchall()
     return [_annotate(_row_to_dict(r)) for r in rows]
 
 

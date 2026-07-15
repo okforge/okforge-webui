@@ -391,15 +391,23 @@ async function startRun() {
   if (!state.pdf || !state.probe) { toast('probe a PDF first (stage 1)'); return; }
   if (!state.kb) { toast('pick or create a KB first (stage 3)'); return; }
   // Duplicate-run guard: a second Start run used to silently enqueue a
-  // whole second job tree (bit a real run on 2026-07-05).
-  const existing = (await api('/api/jobs?limit=150')).jobs.find(j =>
-    j.type === 'full' && ['queued', 'running'].includes(j.status) &&
+  // whole second job tree (bit a real run on 2026-07-05, and again as
+  // job #570 on 2026-07-15). Two lessons baked in: (a) fetch active
+  // jobs only — a big run's own children flood any newest-N window and
+  // bury the row the guard needs; (b) match children too, not just the
+  // 'full' parent — the parent finishes seconds after expanding, so a
+  // live run is visible only through its queued/running children.
+  const existing = (await api('/api/jobs?active=1&limit=1000')).jobs.find(j =>
+    ['queued', 'running'].includes(j.status) &&
     j.kb === state.kb.name && j.params.pdf === state.pdf);
-  if (existing &&
-      !confirm(`Run #${existing.id} already covers this PDF and KB (${existing.status}). ` +
-               'Usually the "resume" button on that run in the job queue is what ' +
-               'you want. Start a second run anyway? (Finished chunks would be skipped.)')) {
-    return;
+  if (existing) {
+    const runId = existing.parent ?? existing.id;
+    if (!confirm(`Run #${runId} already covers this PDF and KB ` +
+                 `(#${existing.id} ${existing.type} is ${existing.status}). ` +
+                 'Usually the "resume" button on that run in the job queue is what ' +
+                 'you want. Start a second run anyway? (Finished chunks would be skipped.)')) {
+      return;
+    }
   }
   let job;
   const useTextLayer = $('#run-textlayer').checked;
@@ -568,9 +576,11 @@ function flashVerifyStage() {
 }
 
 async function refreshJobs() {
-  // Limit must comfortably cover a full book run (28 chunks × 2 children
-  // + parent) so children aren't fetched without their parent row.
-  const d = await api('/api/jobs?limit=150');
+  // Limit must comfortably cover a full book run so children aren't
+  // fetched without their parent row. Size for the worst case actually
+  // seen: a 191-page book at 1 page per chunk is ~400 rows (2 children
+  // per chunk + parent), which blew past the old 150.
+  const d = await api('/api/jobs?limit=1000');
   // Completion signal: a top-level run finishing should point at stage 5
   // instead of ending silently. Empty map on first refresh after a page
   // load means already-done jobs never re-toast.

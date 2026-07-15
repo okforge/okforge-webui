@@ -141,17 +141,25 @@ def project_status(project: str) -> dict:
     of the ingest job queue (anything running or queued for this KB)."""
     kb_dir = kb.resolve_kb(project)  # raises ValueError on unknown name
     info = kb.kb_info(kb_dir)
-    recent = jobs.list_jobs(limit=50)
-    mine = [j for j in recent if j["kb"] == project]
+    # Active jobs via the dedicated filter: a big run floods the
+    # newest-N window with its own children, so a windowed fetch would
+    # miss this (or any other) KB's queued/running rows entirely.
+    mine_active = [
+        j for j in jobs.list_jobs(limit=1000, active=True)
+        if j["kb"] == project
+    ]
+    mine_recent = [
+        j for j in jobs.list_jobs(limit=1000) if j["kb"] == project
+    ][:10]
     info["jobs"] = {
         "running": [
             {"id": j["id"], "type": j["type"], "pages": j["params"].get("pages")}
-            for j in mine if j["status"] == "running"
+            for j in mine_active if j["status"] == "running"
         ],
-        "queued": sum(1 for j in mine if j["status"] == "queued"),
+        "queued": sum(1 for j in mine_active if j["status"] == "queued"),
         "failed_recently": [
             {"id": j["id"], "type": j["type"], "error": j["error"]}
-            for j in mine[:10] if j["status"] == "failed"
+            for j in mine_recent if j["status"] == "failed"
         ],
     }
     return info
