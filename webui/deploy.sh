@@ -18,15 +18,27 @@ OPENKB_DIR=${OPENKB_DIR:-/opt/okforge/tooling}
 RUN_USER=${RUN_USER:-${SUDO_USER:-$USER}}
 OPENKB_WEBUI_KB_ROOT=${OPENKB_WEBUI_KB_ROOT:-/opt/okforge/kbs}
 OPENKB_WEBUI_INBOX=${OPENKB_WEBUI_INBOX:-/opt/okforge/inbox}
+# Space-separated browser origins allowed to call /mcp cross-origin
+# (browser-based MCP clients). Empty = CORS off.
+MCP_CORS_ORIGINS=${MCP_CORS_ORIGINS:-}
 
 echo "== static files -> $DOCROOT"
 sudo mkdir -p "$DOCROOT"
 sudo rsync -a --delete static/ "$DOCROOT"/
 
 echo "== Apache vhost ($SERVER_NAME -> $APP_NAME.conf)"
+# MCP_CORS_ORIGINS -> quoted ap_expr list; a dummy entry keeps the
+# <If> blocks valid-but-inert when no origins are configured.
+ORIGINS_EXPR="'cors-disabled'"
+if [ -n "$MCP_CORS_ORIGINS" ]; then
+    ORIGINS_EXPR=""
+    for o in $MCP_CORS_ORIGINS; do ORIGINS_EXPR="$ORIGINS_EXPR'$o', "; done
+    ORIGINS_EXPR=${ORIGINS_EXPR%, }
+fi
 TMP_CONF=$(mktemp)
 sed -e "s/okforge\.local/$SERVER_NAME/g" \
     -e "s/okforge-webui/$APP_NAME/g" \
+    -e "s#@@MCP_CORS_ORIGINS@@#$ORIGINS_EXPR#g" \
     deploy/okforge-webui.conf > "$TMP_CONF"
 sudo install -m 644 "$TMP_CONF" "/etc/apache2/sites-available/$APP_NAME.conf"
 rm -f "$TMP_CONF"
