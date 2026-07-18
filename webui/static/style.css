@@ -54,6 +54,10 @@ main { max-width: 62rem; margin: 1rem auto 4rem; padding: 0 1rem; }
 .stage.disabled { pointer-events: none; }
 .stage.disabled > :not(.gate-hint) { opacity: .55; }
 .gate-hint { color: var(--muted); font-size: .85rem; margin: -.3rem 0 .6rem; }
+#md-files .row { margin: .15rem 0; }
+/* Job-queue run expander (▸/▾ shows a run's technical steps). */
+button.expander { padding: 0 .3rem; border: none; background: none; }
+button.expander:hover { color: var(--accent); }
 .stage h2 { font-size: 1rem; margin: 0 0 .7rem; }
 .stage h3 { font-size: .9rem; margin: 1rem 0 .4rem; }
 .stageno {

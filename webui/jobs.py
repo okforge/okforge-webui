@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 """
 
 JOB_TYPES = {"pilot", "ocr", "translate", "add", "full", "reocr", "extract",
-             "publish", "recompile"}
+             "publish", "recompile", "ingest_md"}
 TERMINAL = {"done", "failed", "cancelled"}
 
 # A running job whose log has been silent this long is flagged as stalled
@@ -113,7 +113,9 @@ def job_files_dir(job: dict) -> Path:
     where its out_md and image crops land."""
     if job["type"] == "pilot":
         return pilot_dir(job["id"])
-    return kbmod.resolve_kb(job["kb"]) / "raw"
+    if job["kb"]:
+        return kbmod.resolve_kb(job["kb"]) / "raw"
+    return md_out_dir(job["params"]["out_name"])
 
 
 # ------------------------------------------------------------- queue API
@@ -236,6 +238,31 @@ def retry(job_id: int) -> dict:
         c.execute("UPDATE jobs SET params = ? WHERE id = ?",
                   (json.dumps(old_params), job_id))
     return new
+
+
+def purge_jobs_for_pdf(pdf_path: str) -> int:
+    """Delete terminal job rows (and their children + log files) that
+    reference this source PDF — called when the PDF itself is deleted,
+    so a later re-upload of the same name starts with a clean history
+    instead of resurfacing the old runs. Active jobs are the caller's
+    problem (the delete endpoint refuses while any exist)."""
+    with _db_lock, _conn() as c:
+        rows = c.execute(
+            "SELECT id FROM jobs WHERE status IN ('done','failed','cancelled') "
+            "AND json_extract(params, '$.pdf') = ?", (pdf_path,)).fetchall()
+        ids = {r[0] for r in rows}
+        if ids:
+            marks = ",".join("?" * len(ids))
+            kid_rows = c.execute(
+                f"SELECT id FROM jobs WHERE parent IN ({marks}) "
+                "AND status IN ('done','failed','cancelled')",
+                tuple(ids)).fetchall()
+            ids |= {r[0] for r in kid_rows}
+            marks = ",".join("?" * len(ids))
+            c.execute(f"DELETE FROM jobs WHERE id IN ({marks})", tuple(ids))
+    for jid in ids:
+        log_path(jid).unlink(missing_ok=True)
+    return len(ids)
 
 
 def children(parent_id: int) -> list[dict]:
@@ -385,6 +412,13 @@ def _run_pilot(job: dict) -> None:
 _STEM_SAFE_RE = re.compile(r"[^\w\-]+")
 
 
+def _page_key(stem: str):
+    """Sort key putting chunk stems in page order (foo_p21_40 after
+    foo_p1_20); non-chunk stems sort after, alphabetically."""
+    m = re.search(r"_p(\d+)", stem)
+    return (0, int(m.group(1)), stem) if m else (1, 0, stem.lower())
+
+
 def _safe_stem(stem: str) -> str:
     """Engine-compatible stem sanitisation (mirrors converter._sanitize_stem)
     so chunk artifacts and the engine's doc names coincide — a PDF stem with
@@ -395,10 +429,24 @@ def _safe_stem(stem: str) -> str:
     return _STEM_SAFE_RE.sub("-", unicodedata.normalize("NFKC", stem)).strip("-") or "document"
 
 
-def ocr_out_md(kb_dir: Path, pdf: Path, pages: str | None,
+def md_out_dir(out_name: str) -> Path:
+    """A standalone OCR run's output dir under MD_OUT_DIR (md-out mode)."""
+    return config.MD_OUT_DIR / _safe_stem(out_name)
+
+
+def _artifact_dir(job: dict) -> Path:
+    """Where a chunk job's .md/.pages.json/_images land: the KB's raw/
+    for KB-bound jobs, MD_OUT_DIR/<out_name>/ for KB-less md-out jobs."""
+    if job["kb"]:
+        return kbmod.resolve_kb(job["kb"]) / "raw"
+    return md_out_dir(job["params"]["out_name"])
+
+
+def ocr_out_md(out_dir: Path, pdf: Path, pages: str | None,
                translate: bool = False) -> Path:
-    """Chunk naming per SeminoleWars: raw/<stem>_p<start>_<end>.md; whole
-    doc keeps the bare stem. Translated chunks get an _en suffix later.
+    """Chunk naming per SeminoleWars: <out_dir>/<stem>_p<start>_<end>.md;
+    whole doc keeps the bare stem. Translated chunks get an _en suffix
+    later. out_dir is a KB's raw/ or an md-out run dir.
 
     Stems are sanitised for new artifacts; when a legacy (unsanitised)
     file already exists it wins, so resume/re-OCR keep working on KBs
@@ -409,26 +457,36 @@ def ocr_out_md(kb_dir: Path, pdf: Path, pages: str | None,
     else:
         suffix = ""
     lang_suffix = "_src" if translate else ""
-    sanitized = kb_dir / "raw" / f"{_safe_stem(pdf.stem)}{suffix}{lang_suffix}.md"
-    legacy = kb_dir / "raw" / f"{pdf.stem}{suffix}{lang_suffix}.md"
+    sanitized = out_dir / f"{_safe_stem(pdf.stem)}{suffix}{lang_suffix}.md"
+    legacy = out_dir / f"{pdf.stem}{suffix}{lang_suffix}.md"
     if legacy != sanitized and legacy.exists() and not sanitized.exists():
         return legacy
     return sanitized
 
 
+def _job_cwd_env(job: dict, out_dir: Path) -> tuple[Path, dict]:
+    """cwd + env for OCR/translate runs: inside a KB, cwd = KB dir so its
+    .env picks the LLM endpoint; KB-less md-out runs take the endpoint
+    from params instead (same pattern as pilots)."""
+    if job["kb"]:
+        kb_dir = kbmod.resolve_kb(job["kb"])
+        return kb_dir, _kb_vision_env(kb_dir)
+    return out_dir, _endpoint_env(job["params"])
+
+
 def _run_ocr(job: dict) -> None:
-    """OCR a chunk into the KB's raw/ dir; cwd = KB dir so the KB's own
-    .env picks the LLM endpoint."""
+    """OCR a chunk into the KB's raw/ dir, or into the md-out run dir
+    for KB-less runs."""
     params = job["params"]
-    kb_dir = kbmod.resolve_kb(job["kb"])
     pdf = probe.allowed_pdf_path(params["pdf"])
     pages = _pages_spec(params)
-    out_md = ocr_out_md(kb_dir, pdf, pages, bool(params.get("translate")))
-    out_md.parent.mkdir(exist_ok=True)
+    out_dir = _artifact_dir(job)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_md = ocr_out_md(out_dir, pdf, pages, bool(params.get("translate")))
     cmd = _ocr_cmd(pdf, out_md, pages, bool(params.get("figures")),
                    prompt_extra=params.get("prompt_extra"))
-    rc = _run_logged(job["id"], cmd, cwd=kb_dir,
-                     env_extra=_kb_vision_env(kb_dir))
+    cwd, env = _job_cwd_env(job, out_dir)
+    rc = _run_logged(job["id"], cmd, cwd=cwd, env_extra=env)
     if rc != 0:
         raise RuntimeError(f"okforge-vision-ocr exited {rc}")
 
@@ -459,12 +517,12 @@ def _run_translate(job: dict) -> None:
     """Translate an OCR'd chunk (<stem>_src.pages.json) to English,
     writing the final <stem>.md next to it so image refs keep resolving."""
     params = job["params"]
-    kb_dir = kbmod.resolve_kb(job["kb"])
     pdf = probe.allowed_pdf_path(params["pdf"])
     pages = _pages_spec(params)
-    src_md = ocr_out_md(kb_dir, pdf, pages, translate=True)
+    out_dir = _artifact_dir(job)
+    src_md = ocr_out_md(out_dir, pdf, pages, translate=True)
     src_json = src_md.with_name(src_md.stem + ".pages.json")
-    out_md = ocr_out_md(kb_dir, pdf, pages, translate=False)
+    out_md = ocr_out_md(out_dir, pdf, pages, translate=False)
     if not src_json.exists():
         raise RuntimeError(
             f"missing {src_json.name} — did the OCR step fail or get skipped?"
@@ -474,8 +532,8 @@ def _run_translate(job: dict) -> None:
     src_name = _LANG_NAMES.get(params.get("src_lang") or "")
     if src_name and src_name != "English":
         cmd += ["--from", src_name]
-    rc = _run_logged(job["id"], cmd, cwd=kb_dir,
-                     env_extra=_kb_vision_env(kb_dir))
+    cwd, env = _job_cwd_env(job, out_dir)
+    rc = _run_logged(job["id"], cmd, cwd=cwd, env_extra=env)
     if rc != 0:
         raise RuntimeError(f"okforge-translate-pages exited {rc}")
 
@@ -624,11 +682,11 @@ def _run_extract(job: dict) -> None:
     import pymupdf
 
     params = job["params"]
-    kb_dir = kbmod.resolve_kb(job["kb"])
     pdf = probe.allowed_pdf_path(params["pdf"])
     pages_spec = _pages_spec(params)
-    out_md = ocr_out_md(kb_dir, pdf, pages_spec, translate=False)
-    out_md.parent.mkdir(exist_ok=True)
+    out_dir = _artifact_dir(job)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_md = ocr_out_md(out_dir, pdf, pages_spec, translate=False)
 
     doc = pymupdf.open(pdf)
     try:
@@ -738,9 +796,18 @@ def _expand_full(job: dict) -> None:
     """The composite job: split the PDF into chunks and enqueue
     OCR → (translate) → add children per chunk, skipping work whose
     artifacts already exist. Re-queueing the same full job is therefore
-    the resume path after a crash or a failed chunk."""
+    the resume path after a crash or a failed chunk.
+
+    dest="md-out" is the KB-less variant: chunks land in
+    MD_OUT_DIR/<out_name>/, no add step, idempotency = file presence."""
     params = job["params"]
-    kb_dir = kbmod.resolve_kb(job["kb"])
+    dest = params.get("dest") or "kb"
+    if dest == "kb":
+        kb_dir = kbmod.resolve_kb(job["kb"])
+        out_dir = kb_dir / "raw"
+    else:
+        out_dir = md_out_dir(params["out_name"])
+        out_dir.mkdir(parents=True, exist_ok=True)
     pdf = probe.allowed_pdf_path(params["pdf"])
     chunk_pages = int(params.get("chunk_pages") or config.DEFAULT_CHUNK_PAGES)
     translate = bool(params.get("translate"))
@@ -777,18 +844,23 @@ def _expand_full(job: dict) -> None:
         chunks.append((s, min(s + chunk_pages - 1, last)))
         s = chunks[-1][1] + 1
 
-    indexed = _indexed_stems(kb_dir)
+    indexed = _indexed_stems(kb_dir) if dest == "kb" else set()
     _log_line(job["id"],
               f"Planning {pdf.name}: pages {first}-{last} of {page_count} in "
-              f"chunks of {chunk_pages}, translate={translate}, figures={figures}")
+              f"chunks of {chunk_pages}, translate={translate}, figures={figures}"
+              + (f", dest={out_dir}" if dest == "md-out" else ""))
     queued_chunks = 0
     for start, end in chunks:
         pages = str(start) if start == end else f"{start}-{end}"
-        final_md = ocr_out_md(kb_dir, pdf, pages, translate=False)
-        src_md = ocr_out_md(kb_dir, pdf, pages, translate=True)
+        final_md = ocr_out_md(out_dir, pdf, pages, translate=False)
+        src_md = ocr_out_md(out_dir, pdf, pages, translate=True)
         if final_md.stem in indexed:
             _log_line(job["id"],
                       f"chunk {pages}: {final_md.stem} already indexed, skipping")
+            continue
+        if dest == "md-out" and final_md.exists():
+            _log_line(job["id"],
+                      f"chunk {pages}: {final_md.name} already on disk, skipping")
             continue
         steps = []
         if not final_md.exists():
@@ -800,13 +872,15 @@ def _expand_full(job: dict) -> None:
                 steps.append("translate")
             else:
                 steps.append("ocr")
-        steps.append("add")
+        if dest == "kb":
+            steps.append("add")
         base = {"pdf": str(pdf), "pages": pages, "figures": figures,
                 "translate": translate, "src_lang": params.get("src_lang"),
                 "text_layer": text_layer,
                 "endpoint": params.get("endpoint"),
                 "chunk_pages": chunk_pages,
-                "prompt_extra": params.get("prompt_extra")}
+                "prompt_extra": params.get("prompt_extra"),
+                "dest": dest, "out_name": params.get("out_name")}
         for step in steps:
             child_params = dict(base)
             if step == "add":
@@ -817,7 +891,86 @@ def _expand_full(job: dict) -> None:
         queued_chunks += 1
     _log_line(job["id"], f"OK: {queued_chunks} chunk(s) queued, "
                          f"{len(chunks) - queued_chunks} skipped")
+    if dest == "md-out" and params.get("auto_ingest"):
+        # Top-level (not a child): the serial worker reaches it only
+        # after every chunk above finished, and its own add children
+        # then group under it in the UI. Idempotent, so a resume of
+        # this full job just queues another cheap catch-up ingest.
+        child = enqueue("ingest_md",
+                        {"src": "md-out", "out_name": params["out_name"],
+                         "create_kb": True, "lang": params.get("lang"),
+                         "endpoint": params.get("endpoint")},
+                        kb_name=params["out_name"])
+        _log_line(job["id"], f"queued auto-ingest job #{child['id']} "
+                             "(runs after the OCR chunks)")
 
+
+
+def _expand_ingest(job: dict) -> None:
+    """Decoupled ingest (composite like `full`): make already-produced
+    chunk artifacts part of the KB. src="md-out" first copies the run's
+    .md/.pages.json/_images from MD_OUT_DIR/<out_name>/ into raw/ —
+    skip-if-exists, never overwrite, since a KB-side artifact may have
+    been re-OCR'd/spliced since (and a stem colliding across runs keeps
+    the first ingest's files). Then one `add` child per not-yet-indexed
+    chunk .md; _run_add's indexed-stem skip makes re-running this job
+    the resume path.
+
+    create_kb: the decoupled-OCR flow's KB springs into existence at
+    first ingest — init it here (worker thread, serial queue, so no
+    concurrent-init risk) instead of requiring a separate create call."""
+    params = job["params"]
+    if params.get("create_kb"):
+        try:
+            kbmod.resolve_kb(job["kb"])
+        except ValueError:
+            kbmod.init_kb(job["kb"], params.get("lang") or "en",
+                          params.get("endpoint"))
+            _log_line(job["id"], f"created KB {job['kb']}")
+    kb_dir = kbmod.resolve_kb(job["kb"])
+    raw = kb_dir / "raw"
+    raw.mkdir(exist_ok=True)
+    src = params.get("src") or "kb"
+    stems_scope = None
+    if src == "md-out":
+        src_dir = md_out_dir(params["out_name"])
+        if not src_dir.is_dir():
+            raise RuntimeError(f"no such md-out run: {src_dir}")
+        stems_scope = {p.stem for p in src_dir.glob("*.md")}
+        for item in sorted(src_dir.iterdir(), key=lambda p: p.name.lower()):
+            if item.name.startswith("."):
+                continue
+            dest = raw / item.name
+            if item.is_file():
+                if dest.exists():
+                    _log_line(job["id"], f"kept existing {item.name}")
+                else:
+                    shutil.copy2(item, dest)
+                    _log_line(job["id"], f"copied {item.name}")
+            elif item.is_dir() and item.name.endswith("_images"):
+                dest.mkdir(exist_ok=True)
+                copied = 0
+                for f in item.iterdir():
+                    if not (dest / f.name).exists():
+                        shutil.copy2(f, dest / f.name)
+                        copied += 1
+                _log_line(job["id"],
+                          f"copied {copied} new file(s) into {item.name}/")
+    indexed = _indexed_stems(kb_dir)
+    queued = 0
+    for md in sorted(raw.glob("*.md"), key=lambda p: _page_key(p.stem)):
+        if md.stem.endswith("_src"):
+            continue  # source-language intermediates, never ingested
+        if stems_scope is not None and md.stem not in stems_scope:
+            continue
+        if md.stem in indexed:
+            _log_line(job["id"], f"{md.stem} already indexed, skipping")
+            continue
+        child = enqueue("add", {"path": str(md)},
+                        kb_name=job["kb"], parent=job["id"])
+        _log_line(job["id"], f"queued add job #{child['id']} for {md.name}")
+        queued += 1
+    _log_line(job["id"], f"OK: {queued} add job(s) queued")
 
 
 def _run_recompile(job: dict) -> None:
@@ -933,6 +1086,7 @@ _RUNNERS = {
     "extract": _run_extract,
     "publish": _run_publish,
     "recompile": _run_recompile,
+    "ingest_md": _expand_ingest,
 }
 
 

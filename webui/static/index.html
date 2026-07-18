@@ -28,12 +28,14 @@
     <label>PDF
       <select id="inbox-select"></select>
     </label>
-    <button id="inbox-refresh" class="small" title="Re-scan the inbox directory">&#8635;</button>
+    <button id="inbox-refresh" class="small"
+      title="Reset: re-scan the inbox, clear the selection and probe info, and clear finished jobs from the queue (tick 'show all KBs' to see them again)">&#8635;</button>
     <span class="or">or</span>
     <input type="file" id="upload-file" accept=".pdf">
     <button id="upload-btn">Upload</button>
     <progress id="upload-progress" class="hidden" max="100" value="0"></progress>
-    <button id="probe-btn" class="primary">Probe</button>
+    <button id="pdf-delete-btn" class="small danger"
+      title="Move the selected PDF out of the inbox into trash/ — recoverable by moving it back">Delete PDF&hellip;</button>
   </div>
   <div id="probe-result" class="result hidden"></div>
 </section>
@@ -60,24 +62,30 @@
   </details>
 </section>
 
-<!-- ================================================== 3 · Set up KB -->
+<!-- ================================================== 3 · Project -->
 <section class="stage" id="stage-kb">
-  <h2><span class="stageno">3</span> Knowledge base</h2>
+  <h2><span class="stageno">3</span> Project</h2>
   <div class="row">
     <label>Existing
-      <select id="kb-select"><option value="">— pick a KB —</option></select>
+      <select id="kb-select"><option value="">— pick a project —</option></select>
     </label>
+    <button id="kb-clear-btn" class="small hidden"
+      title="Clear the selection — to pick another project or create a new one">Clear</button>
     <span class="or">or new:</span>
     <label>Name <input type="text" id="kb-name" placeholder="MySubject" size="18"></label>
-    <label>Lang <input type="text" id="kb-lang" value="en" size="3"></label>
+    <label>Lang <input type="text" id="kb-lang" value="en" size="3"
+      title="Language the knowledge base is initialised with when the project's markdown is first ingested"></label>
     <button id="kb-create-btn">Create</button>
   </div>
+  <p class="muted">A project collects OCR'd markdown in md-out/&lt;name&gt;/;
+  ingesting that markdown into the project's knowledge base is a separate
+  step (stage 5, or the auto-ingest toggle in stage 4).</p>
   <div id="kb-info" class="result hidden"></div>
 </section>
 
 <!-- ================================================== 4 · Run -->
 <section class="stage" id="stage-run">
-  <h2><span class="stageno">4</span> Run — OCR &#8594; (translate) &#8594; add</h2>
+  <h2><span class="stageno">4</span> Run — OCR &#8594; (translate) &#8594; markdown</h2>
   <p class="gate-hint hidden" id="run-gate-hint"></p>
   <div class="row">
     <label class="check"><input type="checkbox" id="run-textlayer"
@@ -92,6 +100,8 @@
     <label>to <input type="number" id="run-to" value="1" min="1"></label>
     <label>Pages per chunk <input type="number" id="chunk-pages" value="20" min="1" max="200" size="4"></label>
     <span id="chunk-plan" class="muted"></span>
+    <label class="check"><input type="checkbox" id="run-auto-ingest"
+      title="When the OCR chunks finish, automatically ingest the project's markdown into its knowledge base (created on first ingest). Leave off to review the markdown first and ingest from stage 5."> ingest into KB when OCR finishes</label>
     <button id="run-btn" class="primary">Start run</button>
   </div>
   <details class="advanced"><summary>Fix a badly-OCR'd page (advanced)</summary>
@@ -119,7 +129,7 @@
       <input type="checkbox" id="jobs-all"> show all KBs</label>
   </h3>
   <table id="jobs-table">
-    <thead><tr><th>#</th><th>type</th><th>KB</th><th>pages</th><th>status</th><th></th></tr></thead>
+    <thead><tr><th>#</th><th>action</th><th>project</th><th>pages</th><th>status</th><th></th></tr></thead>
     <tbody></tbody>
   </table>
 </section>
@@ -127,8 +137,21 @@
 <!-- ================================================== 5 · Verify & use -->
 <section class="stage" id="stage-verify">
   <h2><span class="stageno">5</span> Verify &amp; use</h2>
-  <div id="verify-empty" class="muted">Pick a KB in stage 3 first.</div>
+  <div id="verify-empty" class="muted">Pick a project in stage 3 first.</div>
+  <div id="verify-md" class="hidden">
+    <h3>Markdown</h3>
+    <div class="row">
+      <span id="md-summary" class="muted"></span>
+      <a id="md-browse-link" target="_blank" rel="noopener">browse / download all files</a>
+      <button id="md-ingest-btn" class="small"
+        title="Ingest every markdown chunk that isn't in the knowledge base yet — the KB is created on first ingest; already-ingested chunks are skipped">Ingest md &#8594; knowledge base</button>
+      <button id="md-delete-btn" class="small danger"
+        title="Move this project's markdown folder to trash/ (recoverable) — for redoing the OCR from scratch">Delete markdown&hellip;</button>
+    </div>
+    <div id="md-files"></div>
+  </div>
   <div id="verify-body" class="hidden">
+    <h3>Knowledge base</h3>
     <div class="kbstats" id="kb-stats"></div>
     <div class="row">
       <button id="publish-btn" class="small"
@@ -138,6 +161,10 @@
         title="Browse & download the pristine ingested sources (raw/ — OCR'd chunks, page JSON, image crops, archived PDFs); pipelines get the same URL as JSON">raw sources</a>
       <a id="sources-md-link" target="_blank" rel="noopener" class="muted"
         title="All ingested chunks concatenated in page order as one markdown download — for re-chunking in a vector RAG">all sources (.md)</a>
+      <button id="site-delete-btn" class="small danger hidden"
+        title="Move the published site to trash/ (recoverable); the KB itself is untouched">Remove site&hellip;</button>
+      <button id="retire-kb-btn" class="small danger"
+        title="Move this KB out of the active set into kbs-retired/ — nothing is deleted, restore = move the directory back. Refused while the KB has queued/running jobs.">Retire KB&hellip;</button>
       <button id="copy-publish-cmd" class="small hidden"
         title="Copy the rsync command that pushes this site to the public host">copy go-public cmd</button>
       <span id="site-status" class="muted"></span>

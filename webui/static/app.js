@@ -7,7 +7,8 @@ const $ = s => document.querySelector(s);
 const state = {
   pdf: null,        // selected PDF path
   probe: null,      // last probe result
-  kb: null,         // selected KB info object
+  project: null,    // selected project name (md workspace + optional KB)
+  kb: null,         // the project's KB info object, when the KB exists
   endpoints: [],
   pilotJobId: null,
   watchingJobId: null,  // job the run-live panel follows
@@ -91,6 +92,7 @@ async function loadInbox(selectPath) {
     sel.append(el('option', {value: p.path, text: `${p.name}  (${sizeMb} MB)`}));
   }
   if (selectPath) sel.value = selectPath;
+  updateUploadControls();
 }
 
 function uploadWithProgress(url, formData) {
@@ -127,11 +129,22 @@ function uploadWithProgress(url, formData) {
   });
 }
 
+// One PDF at a time: while a file is selected ("active"), choosing and
+// uploading another is ghosted — clear the selection (pick "— pick a
+// PDF —" or delete the file) to upload the next one. Upload itself
+// also needs a chosen file.
+function updateUploadControls() {
+  const active = !!$('#inbox-select').value;
+  $('#upload-file').disabled = active;
+  $('#upload-btn').disabled = active || !$('#upload-file').files.length;
+}
+
 // A different PDF in the dropdown invalidates the probe and everything
 // staged on it — otherwise a run/pilot would silently use the OLD file.
 // Called from the dropdown's onchange AND after an upload auto-selects
 // the new file (programmatic .value changes fire no change event).
 function pdfSelectionChanged(newValue) {
+  updateUploadControls();
   if (!state.pdf || newValue === state.pdf) return;
   state.pdf = null;
   state.probe = null;
@@ -149,9 +162,11 @@ async function uploadPdf() {
   const fd = new FormData();
   fd.append('file', f);
   const d = await uploadWithProgress('/api/inbox', fd);
+  $('#upload-file').value = '';  // consumed — the dropdown owns it now
   await loadInbox(d.path);
   pdfSelectionChanged(d.path);
   toast(`uploaded ${d.name}`, 'info');
+  await runProbe();  // auto-probe the fresh upload
 }
 
 function verdictText(p) {
@@ -219,10 +234,30 @@ function attachEvents(jobId, {onLog, onProgress, onImage, onStatus}) {
   return es;
 }
 
+// Validate a pages spec before it hits the queue — two live pilots
+// failed on '1,2' (comma form) and '1-4' on a 2-page PDF (job log
+// 572-573, 2026-07-18); catch both here with a usable message.
+function checkPagesSpec(pages) {
+  const m = /^(\d+)(?:-(\d+))?$/.exec(pages);
+  if (!m) {
+    toast(`pages must be one page or a range — e.g. 16 or 5-7 (got "${pages}")`);
+    return false;
+  }
+  const a = +m[1], b = +(m[2] || m[1]);
+  if (b < a) { toast(`backwards range: ${pages}`); return false; }
+  const max = state.probe && state.probe.page_count;
+  if (a < 1 || (max && b > max)) {
+    toast(`page out of range — this document has ${max || '?'} page(s)`);
+    return false;
+  }
+  return true;
+}
+
 async function runPilot(pagesOverride) {
   if (!state.pdf) { toast('probe a PDF first'); return; }
   const pages = pagesOverride || $('#pilot-pages').value.trim();
   if (!pages) { toast('give a pages spec, e.g. 16 or 5-7'); return; }
+  if (!checkPagesSpec(pages)) return;
   const job = await api('/api/jobs', {json: {
     type: 'pilot',
     pdf: state.pdf,
@@ -289,46 +324,83 @@ function renderPilotPage(jobId, pdf, pg) {
     cols, crops);
 }
 
-// ------------------------------------------------------- stage 3: KB setup
+// -------------------------------------------------- stage 3: project setup
+
+// A project is one name spanning both phases: its OCR'd markdown lives
+// in md-out/<name>/ and its knowledge base (created at first ingest) is
+// kbs/<name>/. The dropdown shows one entry per name — the union of KB
+// names and md-out dirs.
 
 async function loadKbs(selectName) {
-  const d = await api('/api/kbs');
+  const [d, m] = await Promise.all([api('/api/kbs'), api('/api/md-out')]);
   state.endpoints = d.endpoints;
   const epSel = $('#endpoint');
   if (!epSel.options.length) {
     epSel.replaceChildren(...d.endpoints.map(e => el('option', {value: e, text: e})));
   }
+  const projects = new Map();  // name -> {kb: info|null, md: run|null}
+  for (const kb of d.kbs) projects.set(kb.name, {kb, md: null});
+  for (const r of m.runs) {
+    if (projects.has(r.name)) projects.get(r.name).md = r;
+    else projects.set(r.name, {kb: null, md: r});
+  }
+  state.projects = projects;
   const sel = $('#kb-select');
   const prev = selectName || sel.value;
-  sel.replaceChildren(el('option', {value: '', text: '— pick a KB —'}));
-  for (const kb of d.kbs) sel.append(el('option', {value: kb.name, text: kb.name}));
+  sel.replaceChildren(el('option', {value: '', text: '— pick a project —'}));
+  for (const name of [...projects.keys()].sort((a, b) =>
+      a.toLowerCase().localeCompare(b.toLowerCase()))) {
+    const p = projects.get(name);
+    const hint = p.kb ? (p.md ? '  · md + KB' : '') : '  · md only';
+    sel.append(el('option', {value: name, text: name + hint}));
+  }
   if (prev) sel.value = prev;
-  state.kbs = d.kbs;
-  if (sel.value) selectKb(sel.value);
+  selectProject(sel.value);
 }
 
-function selectKb(name) {
-  state.kb = (state.kbs || []).find(k => k.name === name) || null;
+function selectProject(name) {
+  state.project = name || null;
+  const p = (name && state.projects.get(name)) || {kb: null, md: null};
+  state.kb = p.kb;
   saveSession();
+  // With a project selected, the new-project controls are ghosted —
+  // Clear first to make another one (prevents half-typed strays).
+  $('#kb-name').disabled = !!name;
+  $('#kb-lang').disabled = !!name;
+  $('#kb-create-btn').disabled = !!name;
+  $('#kb-clear-btn').classList.toggle('hidden', !name);
   const box = $('#kb-info');
-  if (!state.kb) { box.classList.add('hidden'); updateStageGates(); return; }
-  const k = state.kb;
-  box.classList.remove('hidden');
-  box.innerHTML = `
-    <b>${esc(k.name)}</b> <span class="muted">${esc(k.path)}</span><br>
-    <span class="muted">model ${esc(k.model || '?')} · lang ${esc(k.language || '?')} ·
-    endpoint ${esc(k.endpoint || k.endpoint_url || '?')} ·
-    ${k.docs} docs · ${k.concepts} concepts · ${k.entities} entities ·
-    ${k.images} images · ${k.raw_files} raw files</span>`;
-  box.append(el('div', {class: 'row'},
-    el('button', {class: 'small danger', text: 'Retire KB…',
-      title: 'Move this KB out of the active set into kbs-retired/ — ' +
-        'nothing is deleted, restore = move the directory back. ' +
-        'Refused while the KB has queued/running jobs.',
-      onclick: () => retireKb().catch(e => toast(e.message))})));
+  if (!name) {
+    box.classList.add('hidden');
+  } else if (state.kb) {
+    const k = state.kb;
+    box.classList.remove('hidden');
+    box.innerHTML = `
+      <b>${esc(k.name)}</b> <span class="muted">${esc(k.path)}</span><br>
+      <span class="muted">model ${esc(k.model || '?')} · lang ${esc(k.language || '?')} ·
+      endpoint ${esc(k.endpoint || k.endpoint_url || '?')} ·
+      ${k.docs} docs · ${k.concepts} concepts · ${k.entities} entities ·
+      ${k.images} images · ${k.raw_files} raw files</span>`;
+  } else {
+    box.classList.remove('hidden');
+    box.innerHTML = `
+      <b>${esc(name)}</b> <span class="muted">markdown so far — no knowledge
+      base yet; ingest from stage 5 (or the stage-4 auto-ingest toggle)
+      creates it</span>` +
+      (p.md ? `<br><span class="muted">${p.md.chunks} chunk(s),
+        ${p.md.files} file(s) in md-out/${esc(name)}/</span>` : '');
+  }
+  if (name) {
+    box.append(el('div', {class: 'row'},
+      el('button', {class: 'small danger', text: 'Delete project…',
+        title: 'Remove the whole project — markdown to trash/, knowledge base ' +
+          'to kbs-retired/, published site to trash/. Everything is moved ' +
+          'aside, never erased.',
+        onclick: () => deleteProject().catch(e => toast(e.message))})));
+  }
   updateStageGates();
   renderVerify();
-  refreshJobs().catch(() => {});  // re-apply the per-KB job filter
+  refreshJobs().catch(() => {});  // re-apply the per-project job filter
 }
 
 async function retireKb() {
@@ -342,21 +414,98 @@ async function retireKb() {
   if (typed.trim() !== name) { toast('name did not match — KB not retired'); return; }
   const r = await api(`/api/kbs/${encodeURIComponent(name)}`, {method: 'DELETE'});
   toast(`KB ${name} retired to ${r.retired_to}`, 'info');
-  await loadKbs();       // rebuilds the dropdown; the retired name is gone
-  selectKb('');          // loadKbs skips selectKb when the selection vanished
+  $('#kb-select').value = '';
+  // The project may live on as markdown-only (md-out dir stays put).
+  await loadKbs(state.project);
   refreshJobs().catch(() => {});
 }
 
-async function createKb() {
+async function createProject() {
   const name = $('#kb-name').value.trim();
-  if (!name) { toast('KB name required'); return; }
-  const kb = await api('/api/kbs', {json: {
-    name: name,
-    lang: $('#kb-lang').value.trim() || 'en',
-    endpoint: $('#endpoint').value,
-  }});
-  toast(`created KB ${kb.name}`, 'info');
-  await loadKbs(kb.name);
+  if (!name) { toast('project name required'); return; }
+  const d = await api('/api/md-out', {json: {name}});
+  toast(`created project ${d.name}`, 'info');
+  await loadKbs(d.name);
+}
+
+// ------------------------------------------- deletes (all trash-style)
+
+async function deletePdf() {
+  const path = $('#inbox-select').value;
+  if (!path) { toast('pick a PDF first'); return; }
+  const name = path.split(/[\\/]/).pop();
+  if (!confirm(`Delete ${name} from the inbox?\n\n` +
+               'It moves to trash/inbox/ — recoverable by moving it back.\n\n' +
+               'Finished runs and the knowledge base keep their results, but ' +
+               "this PDF's runs can no longer be resumed or re-OCR'd " +
+               'unless you restore it.')) return;
+  const d = await api(`/api/inbox/${encodeURIComponent(name)}`, {method: 'DELETE'});
+  toast(`${d.name} moved to trash` +
+        (d.purged_jobs ? `; ${d.purged_jobs} old job row(s) cleared` : ''), 'info');
+  $('#inbox-select').value = '';
+  pdfSelectionChanged(null);
+  await loadInbox();
+  refreshJobs().catch(() => {});
+}
+
+async function deleteMd() {
+  const name = state.project;
+  if (!name) return;
+  if (!confirm(`Delete ALL markdown of project "${name}"?\n\n` +
+               `md-out/${name}/ moves to trash/md-out/ — recoverable. ` +
+               'The knowledge base (if any) is untouched.')) return;
+  await api(`/api/md-out/${encodeURIComponent(name)}`, {method: 'DELETE'});
+  toast(`markdown of ${name} moved to trash`, 'info');
+  await loadKbs(name);  // md-only projects vanish; selection then clears
+}
+
+async function deleteSite() {
+  const name = state.project;
+  if (!name || !state.kb) return;
+  if (!confirm(`Remove the published site of "${name}"?\n\n` +
+               'It moves to trash/sites/ — the knowledge base is untouched.')) return;
+  await api(`/api/kb/${encodeURIComponent(name)}/site`, {method: 'DELETE'});
+  toast(`site of ${name} moved to trash`, 'info');
+  await loadKbs(name);
+}
+
+async function deleteProject() {
+  const name = state.project;
+  if (!name) return;
+  const p = state.projects.get(name) || {};
+  const parts = [];
+  if (p.md) parts.push('markdown → trash/md-out/');
+  if (p.kb) parts.push('knowledge base → kbs-retired/');
+  if (p.kb && p.kb.published) parts.push('published site → trash/sites/');
+  const typed = prompt(
+    `Delete project "${name}"?\n\nEverything is moved aside, not erased:\n  ` +
+    (parts.join('\n  ') || '(nothing found on disk)') +
+    '\n\nType the project name to confirm:');
+  if (typed === null) return;
+  if (typed.trim() !== name) { toast('name did not match — nothing deleted'); return; }
+  const activeJobs = (await api('/api/jobs?active=1&limit=1000')).jobs;
+  if (activeJobs.some(j => j.kb === name || j.params.out_name === name)) {
+    toast('project has queued/running jobs — wait for them or cancel them first');
+    return;
+  }
+  const gone = [];
+  if (p.kb && p.kb.published) {
+    await api(`/api/kb/${encodeURIComponent(name)}/site`, {method: 'DELETE'});
+    gone.push('site');
+  }
+  if (p.kb) {
+    await api(`/api/kbs/${encodeURIComponent(name)}`, {method: 'DELETE'});
+    gone.push('knowledge base');
+  }
+  if (p.md) {
+    await api(`/api/md-out/${encodeURIComponent(name)}`, {method: 'DELETE'});
+    gone.push('markdown');
+  }
+  toast(`project ${name} deleted (${gone.join(', ') || 'nothing on disk'}) — ` +
+        'recoverable from trash/ and kbs-retired/', 'info');
+  $('#kb-select').value = '';
+  await loadKbs();
+  refreshJobs().catch(() => {});
 }
 
 // ----------------------------------------------------------- stage 4: run
@@ -389,7 +538,7 @@ function updateChunkPlan() {
 
 async function startRun() {
   if (!state.pdf || !state.probe) { toast('probe a PDF first (stage 1)'); return; }
-  if (!state.kb) { toast('pick or create a KB first (stage 3)'); return; }
+  if (!state.project) { toast('pick or create a project first (stage 3)'); return; }
   // Duplicate-run guard: a second Start run used to silently enqueue a
   // whole second job tree (bit a real run on 2026-07-05, and again as
   // job #570 on 2026-07-15). Two lessons baked in: (a) fetch active
@@ -399,49 +548,135 @@ async function startRun() {
   // live run is visible only through its queued/running children.
   const existing = (await api('/api/jobs?active=1&limit=1000')).jobs.find(j =>
     ['queued', 'running'].includes(j.status) &&
-    j.kb === state.kb.name && j.params.pdf === state.pdf);
+    j.params.pdf === state.pdf && !j.kb &&
+    j.params.out_name === state.project);
   if (existing) {
     const runId = existing.parent ?? existing.id;
-    if (!confirm(`Run #${runId} already covers this PDF and KB ` +
+    if (!confirm(`Run #${runId} already covers this PDF and project ` +
                  `(#${existing.id} ${existing.type} is ${existing.status}). ` +
                  'Usually the "resume" button on that run in the job queue is what ' +
                  'you want. Start a second run anyway? (Finished chunks would be skipped.)')) {
       return;
     }
   }
-  let job;
-  const useTextLayer = $('#run-textlayer').checked;
-  if (useTextLayer && state.probe.page_count < 20) {
-    // Short text-layer PDF: the engine's own pymupdf short-doc path is fine.
-    job = await api('/api/jobs', {json: {type: 'add', kb: state.kb.name, path: state.pdf}});
-  } else if (useTextLayer) {
+  // Every run produces markdown into md-out/<project>/ — ingest into the
+  // KB is a separate step (stage 5), or auto-queued via the toggle.
+  const [from, to] = runRange();
+  const body = {
+    type: 'full',
+    dest: 'md-out',
+    out_name: state.project,
+    pdf: state.pdf,
+    pages: `${from}-${to}`,
+    chunk_pages: parseInt($('#chunk-pages').value, 10) || 20,
+    endpoint: $('#endpoint').value,
+  };
+  if ($('#run-textlayer').checked) {
     // Explicitly trusted text layer: chunked pymupdf extraction (no OCR,
-    // no images) instead of the engine's PageIndex TOC path — page-cited
-    // short docs. Opt-in only: old scans often carry poor embedded OCR.
-    const [from, to] = runRange();
-    job = await api('/api/jobs', {json: {
-      type: 'full',
-      kb: state.kb.name,
-      pdf: state.pdf,
-      pages: `${from}-${to}`,
-      text_layer: true,
-      chunk_pages: parseInt($('#chunk-pages').value, 10) || 20,
-    }});
+    // no images). Opt-in only: old scans often carry poor embedded OCR.
+    body.text_layer = true;
   } else {
-    const [from, to] = runRange();
-    job = await api('/api/jobs', {json: {
-      type: 'full',
-      kb: state.kb.name,
-      pdf: state.pdf,
-      pages: `${from}-${to}`,
+    Object.assign(body, {
       figures: $('#run-figures').checked,
       translate: $('#run-translate').checked,
       src_lang: state.probe.language_guess || null,
-      chunk_pages: parseInt($('#chunk-pages').value, 10) || 20,
       prompt_extra: $('#run-prompt-extra').value.trim() || null,
-    }});
+    });
   }
+  if ($('#run-auto-ingest').checked) {
+    body.auto_ingest = true;
+    body.lang = $('#kb-lang').value.trim() || 'en';
+  }
+  const job = await api('/api/jobs', {json: body});
   toast(`queued job #${job.id} (${job.type})`, 'info');
+  refreshJobs();
+}
+
+// ------------------------------- markdown panel (stage 5, every project)
+
+function mdOutUrl(rel) {
+  const base = `/api/md-out/${encodeURIComponent(state.project)}`;
+  return rel ? base + '/' + rel.split('/').map(encodeURIComponent).join('/') : base;
+}
+
+async function renderVerifyMd() {
+  $('#verify-md').classList.remove('hidden');
+  $('#md-browse-link').href = mdOutUrl('');
+  const btn = $('#md-ingest-btn');
+  btn.textContent = state.kb
+    ? 'Ingest new md → knowledge base'
+    : 'Create knowledge base & ingest md';
+  // The create step is the next big action for a fresh project — give
+  // it the primary (blue) look; the incremental ingest stays low-key.
+  btn.classList.toggle('primary', !state.kb);
+  const list = $('#md-files');
+  const empty = () => {
+    $('#md-summary').textContent = '';
+    btn.classList.add('hidden');
+    $('#md-browse-link').classList.add('hidden');
+    $('#md-delete-btn').classList.add('hidden');
+    list.replaceChildren(el('div', {class: 'muted',
+      text: 'no markdown yet — start a run in stage 4 and the chunks appear here'}));
+  };
+  let d;
+  try {
+    d = await api(mdOutUrl(''));
+  } catch (e) {
+    empty();  // legacy KB-only project: no md-out dir yet — runs create it
+    return;
+  }
+  const mds = d.files.filter(f =>
+    f.path.endsWith('.md') && !f.path.endsWith('_src.md') && !f.path.includes('/'));
+  if (!mds.length) { empty(); return; }
+  $('#md-browse-link').classList.remove('hidden');
+  $('#md-delete-btn').classList.remove('hidden');
+  // Which chunks the KB already has — the ingest button only shows
+  // while there is something left to ingest.
+  let indexed = new Set();
+  if (state.kb) {
+    try {
+      indexed = new Set((await api(
+        `/api/kb/${encodeURIComponent(state.kb.name)}/docs`)).docs);
+    } catch (e) { /* engine hiccup: fall through, button stays visible */ }
+  }
+  const uningested = mds.filter(f => !indexed.has(f.path.replace(/\.md$/, '')));
+  const images = d.files.filter(f => IMG_EXT_RE.test(f.path)).length;
+  $('#md-summary').textContent =
+    `${mds.length} markdown chunk(s)` +
+    (state.kb ? `, ${uningested.length} not ingested yet` : '') +
+    (images ? `, ${images} image(s)` : '');
+  btn.classList.toggle('hidden', state.kb ? !uningested.length : false);
+  list.replaceChildren();
+  for (const f of mds) {
+    const row = el('div', {class: 'row'},
+      el('a', {href: mdOutUrl(f.path), target: '_blank', rel: 'noopener',
+               text: f.path}),
+      el('span', {class: 'muted', text: `${(f.size / 1024).toFixed(1)} KB`}));
+    if (state.kb && !indexed.has(f.path.replace(/\.md$/, '')))
+      row.append(el('span', {class: 'muted', text: '· not ingested yet'}));
+    list.append(row);
+  }
+}
+
+async function ingestMdRun() {
+  const name = state.project;
+  if (!name) return;
+  // Double-queue guard: two ingest clicks 8s apart both ran on
+  // 2026-07-18 (jobs 601/602) because nothing stopped the second.
+  const activeJobs = (await api('/api/jobs?active=1&limit=1000')).jobs;
+  if (activeJobs.some(j => j.type === 'ingest_md' && j.kb === name)) {
+    toast('an ingest for this project is already queued or running');
+    return;
+  }
+  const lang = $('#kb-lang').value.trim() || 'en';
+  const ep = $('#endpoint').value;
+  if (!state.kb &&
+      !confirm(`Create knowledge base "${name}" (lang ${lang}, endpoint ${ep}) ` +
+               'and ingest the markdown into it?')) return;
+  const job = await api('/api/jobs', {json: {
+    type: 'ingest_md', kb: name, src: 'md-out', out_name: name,
+    create_kb: true, lang, endpoint: ep}});
+  toast(`queued job #${job.id} (ingest md → KB ${name})`, 'info');
   refreshJobs();
 }
 
@@ -450,6 +685,7 @@ async function startReocr() {
   if (!state.kb) { toast('pick a KB first (stage 3)'); return; }
   const page = parseInt($('#reocr-page').value, 10);
   if (!page || page < 1) { toast('enter a page number'); return; }
+  if (!checkPagesSpec(String(page))) return;
   const job = await api('/api/jobs', {json: {
     type: 'reocr',
     kb: state.kb.name,
@@ -470,6 +706,7 @@ async function startRecompile() {
   if (!state.kb) { toast('pick a KB first (stage 3)'); return; }
   const page = parseInt($('#reocr-page').value, 10);
   if (!page || page < 1) { toast('enter a page number (the chunk containing it is re-ingested)'); return; }
+  if (!checkPagesSpec(String(page))) return;
   const job = await api('/api/jobs', {json: {
     type: 'recompile',
     kb: state.kb.name,
@@ -498,6 +735,15 @@ async function cancelJob(id) {
   refreshJobs();
 }
 
+// Human title for the live panel: "OCR pages p.1-2 · book.pdf (#593)".
+function watchTitle(job) {
+  const pdfName = (job.params.pdf || '').split(/[\\/]/).pop();
+  return jobTypeLabel(job) +
+    (job.params.pages ? ` p.${job.params.pages}` : '') +
+    (pdfName ? ` · ${pdfName}` : '') +
+    ` (#${job.id})`;
+}
+
 function watchJob(job) {
   if (state.watchingJobId === job.id) return;
   if (state.watchEs) state.watchEs.close();  // never two streams at once
@@ -505,8 +751,7 @@ function watchJob(job) {
   const seenCrops = new Set();
   const live = $('#run-live');
   live.classList.remove('hidden');
-  $('#run-live-title').textContent = `job #${job.id} — ${job.type}` +
-    (job.params.pages ? ` p.${job.params.pages}` : '');
+  $('#run-live-title').textContent = watchTitle(job);
   $('#run-log').textContent = '';
   $('#run-crops').replaceChildren();
   const bar = $('#run-progress'), barText = $('#run-progress-text');
@@ -545,27 +790,38 @@ function watchJob(job) {
     onStatus: s => {
       // a stale stream's terminal event must not clear another job's watch
       if (state.watchingJobId !== job.id) return;
-      $('#run-live-title').textContent =
-        `job #${job.id} — ${job.type}${job.params.pages ? ` p.${job.params.pages}` : ''} · ${s.status}`;
+      $('#run-live-title').textContent = `${watchTitle(job)} · ${s.status}`;
       if (['done', 'failed', 'cancelled'].includes(s.status)) {
         if (range) bar.value = bar.max;
         state.watchingJobId = null;
         refreshJobs();
-        if (state.kb) loadKbs(state.kb.name);  // stats moved; refresh
+        if (state.project) loadKbs(state.project).catch(() => {});  // stats moved
       }
     },
   });
 }
 
-// Human labels for job types in the table (raw type stays in the tooltip).
+// Plain-language labels for job types (raw type stays in the tooltip).
 const JOB_TYPE_LABELS = {
-  full: 'book run', add: 'ingest', ocr: 'OCR', translate: 'translate',
-  reocr: 're-OCR page', recompile: 're-ingest chunk', pilot: 'pilot',
-  extract: 'extract', publish: 'publish site',
+  full: 'OCR + ingest', add: 'ingest chunk', ocr: 'OCR pages',
+  translate: 'translate', reocr: 're-OCR page', recompile: 're-ingest chunk',
+  pilot: 'pilot', extract: 'extract text', publish: 'Publish site',
+  ingest_md: 'Ingest into knowledge base',
 };
+
+function jobTypeLabel(j) {
+  if (j.type === 'full' && j.params.dest === 'md-out') return 'OCR → markdown';
+  return JOB_TYPE_LABELS[j.type] || j.type;
+}
 
 // id → status from the previous refresh, to detect running→done transitions
 let prevJobStatuses = new Map();
+// Runs whose technical child steps the user expanded (▸/▾ toggle);
+// survives the 5s refresh cycle.
+const expandedJobs = new Set();
+// Whether Publish is currently held for an in-flight ingest, so
+// #site-status is only rewritten when the gate opens/closes.
+let publishGated = false;
 
 function flashVerifyStage() {
   const h = document.querySelector('#stage-verify h2');
@@ -584,15 +840,51 @@ async function refreshJobs() {
   // Completion signal: a top-level run finishing should point at stage 5
   // instead of ending silently. Empty map on first refresh after a page
   // load means already-done jobs never re-toast.
+  let kbStatsStale = false;
   for (const j of d.jobs) {
     const prev = prevJobStatuses.get(j.id);
     if (['queued', 'running'].includes(prev) && j.status === 'done' &&
-        !j.parent && ['full', 'add', 'publish'].includes(j.type)) {
-      toast(`Run #${j.id} finished — ask your KB in stage 5`, 'info');
-      flashVerifyStage();
+        !j.parent && ['full', 'add', 'publish', 'ingest_md'].includes(j.type)) {
+      if (j.type === 'full' && j.params.dest === 'md-out') {
+        // The md-out parent is just the expander — chunks are still
+        // queued; the roll-up on its row tracks real progress.
+        toast(`run #${j.id} started — markdown appears in stage 5 as chunks finish`, 'info');
+      } else if (j.type === 'ingest_md' &&
+                 !d.jobs.some(k => k.parent === j.id)) {
+        // Ingest that queued no adds: say so, or the click looks ignored.
+        toast(`ingest #${j.id}: nothing new to ingest — the KB already has every chunk`, 'info');
+      } else if (j.type === 'ingest_md') {
+        // This parent is just the expander — chunks are still queued.
+        // The real "finished" signal fires when the publish gate lifts.
+        toast(`ingest #${j.id} started — the KB fills in as chunks land`, 'info');
+        // First ingest creates the KB — refresh so its panel appears.
+        if (j.kb === state.project)
+          loadKbs(state.project).catch(() => {});
+      } else {
+        toast(`Run #${j.id} finished — ask your KB in stage 5`, 'info');
+        flashVerifyStage();
+      }
+    }
+    // A finished chunk of the selected project → refresh its md panel.
+    if (['queued', 'running'].includes(prev) &&
+        ['done', 'failed'].includes(j.status) && !j.kb &&
+        j.params.dest === 'md-out' && j.params.out_name === state.project) {
+      renderVerifyMd().catch(() => {});
+    }
+    // An ingested chunk (add child) of the selected project → the KB
+    // stats tiles are stale. The parent-only checks above never see
+    // these, and the auto-watch may not be following them (state.kb is
+    // still null while the ingest's create_kb KB is brand new).
+    if (['queued', 'running'].includes(prev) && j.status === 'done' &&
+        j.type === 'add' && j.kb === state.project) {
+      kbStatsStale = true;
     }
   }
   prevJobStatuses = new Map(d.jobs.map(j => [j.id, j.status]));
+  // One refresh per cycle no matter how many chunks landed; loadKbs →
+  // selectProject → renderVerify redraws the tiles (and reveals the KB
+  // panel on a new KB's first chunk).
+  if (kbStatsStale) loadKbs(state.project).catch(() => {});
   // Default view: the selected KB's jobs only — a couple of book runs
   // would otherwise grow the table forever. Anything still queued or
   // running stays visible regardless of KB (the queue is serial
@@ -601,13 +893,18 @@ async function refreshJobs() {
   // PDF: your pilot never vanishes mid-flow, but pilots from other
   // books/days don't pile up. "show all KBs" reveals everything.
   const active = j => ['queued', 'running'].includes(j.status);
-  const currentPdfKbless = j =>
-    !j.kb && state.pdf && j.params.pdf === state.pdf;
+  const kblessRelevant = j => !j.kb && (
+    (state.pdf && j.params.pdf === state.pdf) ||
+    (state.project && j.params.out_name === state.project));
+  // The stage-1 rescan reset "clears" the queue view: finished jobs from
+  // before the reset stay hidden (still in the DB; "show all" reveals).
+  const cleared = j => !active(j) && j.id <= (state.clearedBelowId || 0);
   let jobsToShow;
   if ($('#jobs-all').checked) jobsToShow = d.jobs;
   else if (state.kb) jobsToShow = d.jobs.filter(j =>
-    j.kb === state.kb.name || active(j) || currentPdfKbless(j));
-  else jobsToShow = d.jobs.filter(j => active(j) || currentPdfKbless(j));
+    !cleared(j) && (j.kb === state.kb.name || active(j) || kblessRelevant(j)));
+  else jobsToShow = d.jobs.filter(j =>
+    !cleared(j) && (active(j) || kblessRelevant(j)));
   const tbody = $('#jobs-table tbody');
   tbody.replaceChildren();
   // group children under their parent, newest parents first
@@ -625,17 +922,75 @@ async function refreshJobs() {
   for (const [pid, kids] of byParent) {
     if (!topIds.has(pid)) tops.push(...kids);
   }
+  // While an ingest for the selected project is in flight, its button
+  // is a no-op — grey it out (double-queue guard's visible half).
+  $('#md-ingest-btn').disabled = !!(state.project && d.jobs.some(j =>
+    ['queued', 'running'].includes(j.status) &&
+    j.type === 'ingest_md' && j.kb === state.project));
+  // Publishing mid-ingest would build a site missing the chunks still
+  // in flight — hold the button until every add lands. The gate flag
+  // keeps #site-status writes to transitions only, so renderVerify's
+  // own text isn't clobbered every 5 s.
+  const ingestActive = !!(state.project && d.jobs.some(j =>
+    ['queued', 'running'].includes(j.status) &&
+    ['ingest_md', 'add'].includes(j.type) && j.kb === state.project));
+  $('#publish-btn').disabled = ingestActive;
+  if (ingestActive !== publishGated) {
+    publishGated = ingestActive;
+    $('#site-status').textContent = ingestActive
+      ? 'ingest in progress — publish when it finishes'
+      : (state.kb && state.kb.published ? '' : 'no site built yet');
+    if (!ingestActive) {
+      toast('Ingest finished — ask your KB in stage 5', 'info');
+      flashVerifyStage();
+    }
+  }
   const addRow = (j, isChild) => {
     const tr = el('tr', isChild ? {class: 'child'} : {});
+    const composite = ['full', 'ingest_md'].includes(j.type);
+    const kids = byParent.get(j.id) || [];
+    // Composite-job rollup, computed up front: it feeds both the status
+    // line and the resume-button decision below.
+    let rollup = null;
+    if (composite) {
+      const mdOut = j.params.dest === 'md-out';
+      const finalType = j.type === 'ingest_md' ? 'add'
+        : mdOut
+          ? (j.params.text_layer ? 'extract'
+             : j.params.translate ? 'translate' : 'ocr')
+          : 'add';
+      const chunks = new Map();
+      for (const c of kids) {
+        const key = c.params.pages || c.params.path;
+        if (c.type !== finalType || !key) continue;
+        if (!chunks.has(key)) chunks.set(key, false);
+        if (c.status === 'done') chunks.set(key, true);
+      }
+      if (chunks.size)
+        rollup = {mdOut,
+                  done: [...chunks.values()].filter(Boolean).length,
+                  total: chunks.size};
+    }
     const actions = el('td');
     if (['queued', 'running'].includes(j.status))
       actions.append(el('button', {class: 'small', text: 'cancel',
         onclick: () => cancelJob(j.id)}));
-    if (['done', 'failed', 'cancelled'].includes(j.status) && j.type !== 'pilot')
+    // A fully-completed composite offers no resume — there is nothing to
+    // resume, and the button read as "something is unfinished". It shows
+    // only when interrupted (failed/cancelled) or done with chunks
+    // missing — and never while any child step is still queued/running
+    // (the parent row IS the running run then; resuming would double it).
+    const kidsActive = kids.some(c => ['queued', 'running'].includes(c.status));
+    const resumable = composite
+      ? (!kidsActive &&
+         (['failed', 'cancelled'].includes(j.status) ||
+          (j.status === 'done' && rollup && rollup.done < rollup.total)))
+      : ['done', 'failed', 'cancelled'].includes(j.status);
+    if (resumable && j.type !== 'pilot')
       actions.append(' ', el('button', {class: 'small',
-        text: j.type === 'full' ? 'resume' : 'retry',
-        title: j.type === 'full'
-          ? 'Re-expand this run with identical range + chunk size; already-done chunks are skipped'
+        text: composite ? 'resume' : 'retry',
+        title: composite
+          ? 'Re-expand this run with identical params; already-done chunks are skipped'
           : 'Re-queue this step with identical params',
         onclick: () => retryJob(j.id)}));
     if (j.status === 'running' || (j.status !== 'queued' && j.type !== 'full'))
@@ -652,21 +1007,22 @@ async function refreshJobs() {
     let statusText = j.status + (j.error ? ' — ' + j.error : '');
     let statusClass = j.status;
     if (j.params.retried_as) statusText += ` → retried as #${j.params.retried_as}`;
-    // Full-job rollup: one line answering "is the book complete?" —
-    // a chunk counts done when ANY add covering its pages succeeded.
-    if (j.type === 'full') {
-      const kids = byParent.get(j.id) || [];
-      const chunks = new Map();
-      for (const c of kids) {
-        if (c.type !== 'add' || !c.params.pages) continue;
-        if (!chunks.has(c.params.pages)) chunks.set(c.params.pages, false);
-        if (c.status === 'done') chunks.set(c.params.pages, true);
+    // One line answering "is the run complete?" — a chunk counts done
+    // when ANY final step covering it succeeded (add for ingests, the
+    // last OCR-side step for md runs).
+    if (rollup) {
+      // The expander parent finishes seconds in; while its child steps
+      // are still going the collapsed row should read as running work.
+      if (j.status === 'done' && kidsActive) {
+        statusText = 'working';
+        statusClass = 'running';
       }
-      if (chunks.size) {
-        const done = [...chunks.values()].filter(Boolean).length;
-        statusText += ` — ${done}/${chunks.size} chunks ingested`;
-        if (done === chunks.size && j.status === 'done') statusClass = 'done';
-      }
+      statusText += ` — ${rollup.done}/${rollup.total} chunks ` +
+        (rollup.mdOut ? 'OCR’d' : 'ingested');
+      if (rollup.done === rollup.total && j.status === 'done' && !kidsActive)
+        statusClass = 'done';
+    } else if (j.type === 'ingest_md' && j.status === 'done' && !kids.length) {
+      statusText += ' — nothing new to ingest';
     }
     if (j.status === 'running') {
       if (j.stalled) {
@@ -676,10 +1032,24 @@ async function refreshJobs() {
         statusText += ` — ~${fmtEta(j.eta_seconds)} left`;
       }
     }
+    // Runs collapse to one row; ▸ reveals the technical child steps.
+    const idCell = el('td');
+    if (!isChild && kids.length) {
+      const open = expandedJobs.has(j.id);
+      idCell.append(el('button', {class: 'small expander', text: open ? '▾' : '▸',
+        title: open ? 'hide the steps of this run'
+                    : `show the ${kids.length} step(s) of this run`,
+        onclick: () => {
+          if (expandedJobs.has(j.id)) expandedJobs.delete(j.id);
+          else expandedJobs.add(j.id);
+          refreshJobs().catch(() => {});
+        }}), ' ');
+    }
+    idCell.append('#' + j.id);
     tr.append(
-      el('td', {text: '#' + j.id}),
-      el('td', {text: JOB_TYPE_LABELS[j.type] || j.type, title: j.type}),
-      el('td', {text: j.kb || ''}),
+      idCell,
+      el('td', {text: jobTypeLabel(j), title: j.type}),
+      el('td', {text: j.kb || j.params.out_name || ''}),
       el('td', {text: j.params.pages || ''}),
       el('td', {}, el('span', {class: 'status ' + statusClass, text: statusText})),
       actions);
@@ -694,15 +1064,16 @@ async function refreshJobs() {
   };
   for (const j of tops) {
     addRow(j, false);
-    // children in run order (ascending id): done chunks first, then the
-    // active one, then what's still queued — reads like a progress list
-    for (const c of (byParent.get(j.id) || []).sort((a, b) => a.id - b.id))
-      addRow(c, true);
+    // Child steps render only when the run is expanded — in run order
+    // (ascending id): done chunks, then the active one, then queued.
+    if (expandedJobs.has(j.id))
+      for (const c of (byParent.get(j.id) || []).sort((a, b) => a.id - b.id))
+        addRow(c, true);
   }
   if (!tbody.children.length) {
     tbody.append(el('tr', {}, el('td', {colspan: '6', class: 'muted',
-      text: state.kb ? 'no jobs for this KB yet'
-                     : 'no jobs yet — run a probe or pilot above'})));
+      text: state.project ? 'no jobs for this project yet'
+                          : 'no jobs yet — run a probe or pilot above'})));
   }
 }
 
@@ -714,8 +1085,20 @@ function wikiUrl(rel) {
 }
 
 function renderVerify() {
-  if (!state.kb) return;
+  if (!state.project) {
+    $('#verify-body').classList.add('hidden');
+    $('#verify-md').classList.add('hidden');
+    $('#verify-empty').classList.remove('hidden');
+    return;
+  }
   $('#verify-empty').classList.add('hidden');
+  // Markdown panel shows for every project; the KB panel joins it once
+  // the knowledge base exists (first ingest creates it).
+  renderVerifyMd().catch(e => toast(e.message));
+  if (!state.kb) {
+    $('#verify-body').classList.add('hidden');
+    return;
+  }
   $('#verify-body').classList.remove('hidden');
   const k = state.kb;
   $('#kb-stats').replaceChildren(...[
@@ -730,6 +1113,7 @@ function renderVerify() {
   $('#raw-link').href = `/api/kb/${encodeURIComponent(k.name)}/raw`;
   $('#sources-md-link').href = `/api/kb/${encodeURIComponent(k.name)}/sources.md`;
   $('#copy-publish-cmd').classList.toggle('hidden', !k.published);
+  $('#site-delete-btn').classList.toggle('hidden', !k.published);
   $('#site-status').textContent = k.published
     ? '' : 'no site built yet';
   loadWikiNav().catch(e => toast(e.message));
@@ -989,7 +1373,8 @@ function saveSession() {
   try {
     localStorage.setItem(SESSION_KEY, JSON.stringify({
       pdf: state.pdf,
-      kb: state.kb ? state.kb.name : null,
+      project: state.project,
+      clearedBelowId: state.clearedBelowId || 0,
     }));
   } catch (e) { /* private mode / storage full — persistence is best-effort */ }
 }
@@ -1000,8 +1385,8 @@ function loadSession() {
 }
 
 async function restoreSession(saved) {
-  // The KB restore rides through loadKbs(saved.kb) → selectKb; this brings
-  // back the probed PDF. If it's gone from the inbox, drop it silently.
+  // The project restore rides through loadKbs(savedProject) → selectProject;
+  // this brings back the probed PDF. If it's gone from the inbox, drop it.
   if (!saved || !saved.pdf) return;
   const sel = $('#inbox-select');
   if (![...sel.options].some(o => o.value === saved.pdf)) { saveSession(); return; }
@@ -1022,26 +1407,44 @@ function updateStageGates() {
   // usually old scans whose embedded OCR we don't trust — the default
   // pipeline renders pages and does our own OCR + image extraction.
   const needProbe = !state.probe;
-  const needKb = !state.kb;
+  const needProject = !state.project;
   $('#stage-pilot').classList.toggle('disabled', needProbe);
   setGateHint('#pilot-gate-hint', needProbe ? 'Probe a PDF in stage 1 first.' : '');
-  $('#stage-run').classList.toggle('disabled', needProbe || needKb);
+  $('#stage-run').classList.toggle('disabled', needProbe || needProject);
   let runHint = '';
-  if (needProbe && needKb)
-    runHint = 'Probe a PDF in stage 1 and pick or create a KB in stage 3 first.';
+  if (needProbe && needProject)
+    runHint = 'Probe a PDF in stage 1 and pick or create a project in stage 3 first.';
   else if (needProbe)
     runHint = 'Probe a PDF in stage 1 first.';
-  else if (needKb)
-    runHint = 'Pick or create a KB in stage 3 first.';
+  else if (needProject)
+    runHint = 'Pick or create a project in stage 3 first.';
   setGateHint('#run-gate-hint', runHint);
-  $('#stage-verify').classList.toggle('disabled', needKb);
+  $('#stage-verify').classList.toggle('disabled', needProject);
 }
 
 // ------------------------------------------------------------------ init
 
 function init() {
-  $('#inbox-refresh').onclick = () => loadInbox().catch(e => toast(e.message));
-  $('#inbox-select').onchange = e => pdfSelectionChanged(e.target.value);
+  // Rescan is a reset: selection returns to the "— pick a PDF —" state,
+  // probe/pilot info clears, and finished jobs leave the queue view
+  // (they stay in the database — "show all KBs" reveals them).
+  $('#inbox-refresh').onclick = async () => {
+    try {
+      await loadInbox();
+      $('#inbox-select').value = '';
+      pdfSelectionChanged(null);
+      const d = await api('/api/jobs?limit=1');
+      state.clearedBelowId = d.jobs.length ? d.jobs[0].id : 0;
+      saveSession();
+      refreshJobs().catch(() => {});
+    } catch (e) { toast(e.message); }
+  };
+  // Auto-probe: picking a PDF probes it right away (fast local scan).
+  $('#inbox-select').onchange = e => {
+    pdfSelectionChanged(e.target.value);
+    if (e.target.value) runProbe().catch(err => toast(err.message));
+  };
+  $('#upload-file').onchange = updateUploadControls;
   // Discovering in the pilot that you need --figures should carry into the
   // run; unticking the run box must NOT reach back into the pilot.
   $('#pilot-figures').onchange = e => {
@@ -1052,14 +1455,22 @@ function init() {
     if (e.target.value.trim()) $('#run-prompt-extra').value = e.target.value.trim();
   };
   $('#upload-btn').onclick = () => uploadPdf().catch(e => toast(e.message));
-  $('#probe-btn').onclick = () => runProbe().catch(e => toast(e.message));
   $('#pilot-btn').onclick = () => runPilot().catch(e => toast(e.message));
-  $('#kb-select').onchange = e => selectKb(e.target.value);
-  $('#kb-create-btn').onclick = () => createKb().catch(e => toast(e.message));
+  $('#kb-select').onchange = e => selectProject(e.target.value);
+  $('#kb-create-btn').onclick = () => createProject().catch(e => toast(e.message));
+  $('#kb-clear-btn').onclick = () => {
+    $('#kb-select').value = '';
+    selectProject('');
+  };
   $('#chunk-pages').oninput = updateChunkPlan;
   $('#run-from').oninput = updateChunkPlan;
   $('#run-to').oninput = updateChunkPlan;
   $('#run-btn').onclick = () => startRun().catch(e => toast(e.message));
+  $('#md-ingest-btn').onclick = () => ingestMdRun().catch(e => toast(e.message));
+  $('#pdf-delete-btn').onclick = () => deletePdf().catch(e => toast(e.message));
+  $('#md-delete-btn').onclick = () => deleteMd().catch(e => toast(e.message));
+  $('#site-delete-btn').onclick = () => deleteSite().catch(e => toast(e.message));
+  $('#retire-kb-btn').onclick = () => retireKb().catch(e => toast(e.message));
   $('#reocr-btn').onclick = () => startReocr().catch(e => toast(e.message));
   $('#recompile-btn').onclick = () => startRecompile().catch(e => toast(e.message));
   $('#jobs-all').onchange = () => refreshJobs().catch(() => {});
@@ -1084,8 +1495,11 @@ function init() {
   $('#endpoint').onchange = pollSlots;
 
   const saved = loadSession();
+  state.clearedBelowId = (saved && saved.clearedBelowId) || 0;
+  // Older sessions stored kb/md instead of project — same name either way.
+  const savedProject = saved && (saved.project || saved.kb || saved.md || undefined);
   Promise.all([
-    loadKbs(saved ? saved.kb : undefined).then(pollSlots),
+    loadKbs(savedProject).then(pollSlots),
     loadInbox(),
   ]).then(() => restoreSession(saved))
     .catch(e => toast(e.message));

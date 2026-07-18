@@ -49,6 +49,13 @@ def allowed_pdf_path(pdf: str) -> Path:
     """Resolve a client-supplied path, restricted to the inbox dir and
     KB raw/ dirs. Raises ValueError otherwise."""
     p = Path(pdf).expanduser().resolve()
+    if not p.exists():
+        # Deletes are trash-style moves, so this is recoverable — say so
+        # (the message lands verbatim in the failed job's status row).
+        raise ValueError(
+            f"source PDF no longer exists: {p.name} — it may have been "
+            "deleted; restore it from trash/inbox/ (or re-upload it) to "
+            "run this again")
     if not p.is_file() or p.suffix.lower() != ".pdf":
         raise ValueError(f"not a PDF file: {pdf}")
     allowed_roots = [config.INBOX_DIR.resolve()]

@@ -28,6 +28,11 @@ KB_ROOT = Path(os.environ.get("OPENKB_WEBUI_KB_ROOT", _BASE / "kbs"))
 # discovery scan stops seeing them; restore = move the dir back.
 RETIRED_DIR = Path(os.environ.get("OPENKB_WEBUI_RETIRED_DIR", _BASE / "kbs-retired"))
 
+# Web-UI "deletes" (inbox PDFs, project markdown, published sites) MOVE
+# things here — same archive-first philosophy as RETIRED_DIR. Emptying
+# the trash is a deliberate manual act outside the UI.
+TRASH_DIR = Path(os.environ.get("OPENKB_WEBUI_TRASH", _BASE / "trash"))
+
 # Per-KB state dir name. STATE_DIR_NAME is what `okforge init` scaffolds as
 # of engine v0.8.0; LEGACY_STATE_DIR_NAME is what a not-yet-migrated KB
 # still has (`okforge migrate` moves it) — mirrors okforge.config's own
@@ -111,6 +116,11 @@ JOB_LOG_DIR = WEBUI_DIR / "logs"
 
 # Default chunk size for full-book ingests (pages per OCR→add chunk).
 DEFAULT_CHUNK_PAGES = 20
+
+# Standalone OCR outputs (md-out mode): runs not tied to any KB land in
+# MD_OUT_DIR/<run-name>/ with the same .md + .pages.json + _images contract
+# as a KB's raw/ dir.
+MD_OUT_DIR = Path(os.environ.get("OPENKB_WEBUI_MD_OUT", _BASE / "md-out"))
 
 # Quartz publishing (ROADMAP P6): one shared install builds per-KB static
 # sites into SITES_DIR/<Subject>/. Making a site public stays a manual

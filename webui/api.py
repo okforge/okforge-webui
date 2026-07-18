@@ -11,6 +11,8 @@ import asyncio
 import contextlib
 import json
 import re
+import shutil
+import time
 from pathlib import Path
 from urllib.parse import quote
 
@@ -51,6 +53,46 @@ def get_inbox():
                 "mtime": int(st.st_mtime),
             })
     return {"inbox_dir": str(config.INBOX_DIR), "pdfs": pdfs}
+
+
+def _to_trash(src: Path, kind: str) -> Path:
+    """Archive-first delete: MOVE src into TRASH_DIR/<kind>/ (created on
+    demand). Name collisions get a timestamp suffix so nothing is ever
+    overwritten; emptying the trash is a manual act outside the UI."""
+    dest_dir = config.TRASH_DIR / kind
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / src.name
+    if dest.exists():
+        dest = dest_dir / f"{src.name}.{int(time.time())}"
+    shutil.move(str(src), str(dest))
+    return dest
+
+
+def _active_jobs() -> list[dict]:
+    return jobs.list_jobs(limit=1000, active=True)
+
+
+def _project_busy(name: str) -> bool:
+    """Queued/running work touching a project (its KB or its md-out)."""
+    return any(j["kb"] == name or j["params"].get("out_name") == name
+               for j in _active_jobs())
+
+
+@app.delete("/api/inbox/{name}")
+def delete_pdf(name: str):
+    """Move an inbox PDF to trash/inbox/. Refused while any queued or
+    running job references it — the OCR would fail mid-run."""
+    p = config.INBOX_DIR / Path(name).name
+    if not p.is_file() or p.suffix.lower() != ".pdf":
+        raise HTTPException(404, f"no such inbox PDF: {name}")
+    if any(j["params"].get("pdf") == str(p) for j in _active_jobs()):
+        raise HTTPException(409, f"{p.name} has queued/running jobs — "
+                                 "wait for them or cancel them first")
+    trashed = _to_trash(p, "inbox")
+    # Its job history goes with it — a re-upload of the same name must
+    # not resurface the old runs in the queue.
+    purged = jobs.purge_jobs_for_pdf(str(p))
+    return {"name": p.name, "trashed_to": str(trashed), "purged_jobs": purged}
 
 
 @app.post("/api/inbox")
@@ -158,6 +200,12 @@ class JobCreate(BaseModel):
     endpoint: str | None = None
     chunk_pages: int = config.DEFAULT_CHUNK_PAGES
     prompt_extra: str | None = None  # free text appended to the OCR prompt
+    dest: str = "kb"  # full jobs: "kb" (ingest) or "md-out" (markdown only)
+    out_name: str | None = None  # md-out run name (dir under MD_OUT_DIR)
+    src: str | None = None  # ingest_md jobs: "kb" (raw/) or "md-out"
+    auto_ingest: bool = False  # md-out full jobs: queue ingest_md at the end
+    create_kb: bool = False  # ingest_md jobs: init the KB if it doesn't exist
+    lang: str | None = None  # KB language when create_kb/auto_ingest inits one
 
 
 def _validate_job(req: JobCreate) -> dict:
@@ -196,6 +244,52 @@ def _validate_job(req: JobCreate) -> dict:
         params["pages"] is None or "-" in params["pages"]
     ):
         raise ValueError(f'{req.type} takes exactly one page, e.g. pages="42"')
+    if req.dest not in ("kb", "md-out"):
+        raise ValueError(f"unknown dest: {req.dest!r}")
+    if req.type == "full" and req.dest == "md-out":
+        # KB-less markdown-only run: chunks land in MD_OUT_DIR/<out_name>/.
+        if req.kb:
+            raise ValueError("an md-out run takes no kb")
+        if req.endpoint and req.endpoint not in config.ENDPOINTS:
+            raise ValueError(f"unknown endpoint: {req.endpoint!r}")
+        params["dest"] = "md-out"
+        params["out_name"] = jobs._safe_stem(
+            req.out_name or Path(params["pdf"]).stem)
+        if req.auto_ingest:
+            # Fail now, not when the auto-queued ingest tries to init.
+            if not kb.KB_NAME_RE.match(params["out_name"]):
+                raise ValueError(
+                    "auto-ingest needs a KB-valid project name "
+                    f"(letter first, then letters/digits/_-): {params['out_name']!r}")
+            params["auto_ingest"] = True
+            params["lang"] = req.lang
+        return params
+    if req.type == "ingest_md":
+        # Decoupled ingest: add already-produced chunk md into a KB —
+        # from an md-out run (copied into raw/ first) or from raw/ itself.
+        if not req.kb:
+            raise ValueError("ingest_md job requires a kb")
+        if req.create_kb:
+            # KB may not exist yet — the runner inits it (decoupled flow).
+            if not kb.KB_NAME_RE.match(req.kb):
+                raise ValueError(f"invalid KB name: {req.kb!r}")
+            if req.endpoint and req.endpoint not in config.ENDPOINTS:
+                raise ValueError(f"unknown endpoint: {req.endpoint!r}")
+            params["create_kb"] = True
+            params["lang"] = req.lang
+        else:
+            kb.resolve_kb(req.kb)
+        src = req.src or "kb"
+        if src not in ("kb", "md-out"):
+            raise ValueError(f"unknown src: {src!r}")
+        if src == "md-out":
+            if not req.out_name:
+                raise ValueError("ingest_md from md-out requires out_name")
+            params["out_name"] = jobs._safe_stem(req.out_name)
+            if not (config.MD_OUT_DIR / params["out_name"]).is_dir():
+                raise ValueError(f"no such md-out run: {req.out_name}")
+        params["src"] = src
+        return params
     if not req.kb:
         raise ValueError(f"{req.type} job requires a kb")
     kb_dir = kb.resolve_kb(req.kb)  # raises on unknown/invalid
@@ -424,23 +518,23 @@ def get_wiki(name: str, rel_path: str = ""):
 _RAW_BINARY_TYPES = dict(_WIKI_IMAGE_TYPES, **{".pdf": "application/pdf"})
 
 
-def _raw_index_html(name: str, rel_path: str, files: list[dict]) -> str:
-    """Browser view of a raw/ listing: download links per file plus the
-    one-click concatenated sources.md. Pipelines never see this — they
-    get JSON (content negotiation in get_raw)."""
+def _tree_index_html(title: str, url_prefix: str, files: list[dict],
+                     note: str = "", extra_html: str = "") -> str:
+    """Browser view of a raw/ or md-out listing: download links per file.
+    Pipelines never see this — they get JSON (content negotiation in
+    _serve_tree)."""
     import html as _html
 
-    kb_url = f"/api/kb/{quote(name)}"
     rows = []
     for f in files:
-        href = f"{kb_url}/raw/" + "/".join(quote(s) for s in f["path"].split("/"))
+        href = url_prefix + "/".join(quote(s) for s in f["path"].split("/"))
         is_img = Path(f["path"]).suffix.lower() in _WIKI_IMAGE_TYPES
         rows.append(
             f'<tr><td><a href="{href}"{"" if is_img else " download"}>'
             f'{_html.escape(f["path"])}</a></td>'
             f'<td class="n">{f["size"]:,}</td></tr>'
         )
-    where = _html.escape(f"{name}/raw/{rel_path}".rstrip("/"))
+    where = _html.escape(title)
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>{where}</title><style>
 body {{ font: 15px/1.5 system-ui, sans-serif; margin: 2rem auto; max-width: 50rem; padding: 0 1rem; }}
@@ -450,38 +544,23 @@ td.n {{ text-align: right; color: #777; white-space: nowrap; }}
 .note {{ color: #777; font-size: .85rem; }}
 </style></head><body>
 <h1>{where}</h1>
-<p class="note">Pristine ingested sources (OCR'd markdown chunks, page JSON,
-image crops, archived PDFs). Click to download; images open for viewing.
-Pipelines should request this URL with <code>Accept: application/json</code>
-(curl's default) for a machine-readable listing.</p>
-<p><a href="{kb_url}/sources.md"><b>Download all ingested chunks as one
-markdown file</b></a> <span class="note">(page order — for re-chunking in a
-vector RAG)</span></p>
+<p class="note">{note}</p>
+{extra_html}
 <table>{"".join(rows)}</table>
 </body></html>"""
 
 
-@app.get("/api/kb/{name}/raw")
-@app.get("/api/kb/{name}/raw/{rel_path:path}")
-def get_raw(name: str, request: Request, rel_path: str = ""):
-    """Read-only access to raw/ — the pristine ingested sources
-    (<stem>_pN_M.md chunks, .pages.json page arrays, _images/ crops,
-    archived PDFs) so external pipelines can pull them (ROADMAP P12:
-    feed a separate RAG). Directories return a flat RECURSIVE listing
-    with size + mtime — one call enumerates everything a pipeline needs
-    to sync — as JSON, or as a human download page when the client
-    prefers text/html (a browser). Files are served directly. Hidden
-    entries (.reocr_job* scratch dirs) are skipped."""
-    try:
-        kb_dir = kb.resolve_kb(name)
-    except ValueError as e:
-        raise HTTPException(404, str(e))
-    base = (kb_dir / "raw").resolve()
-    if not base.is_dir():
-        raise HTTPException(404, f"{name} has no raw/ yet")
+def _serve_tree(base: Path, rel_path: str, request: Request, *,
+                title: str, url_prefix: str, note: str = "",
+                extra_html: str = "", json_extra: dict | None = None):
+    """Shared read-only tree browser (KB raw/ and md-out runs).
+    Directories return a flat RECURSIVE listing with size + mtime — one
+    call enumerates everything a pipeline needs to sync — as JSON, or as
+    a human download page when the client prefers text/html (a browser).
+    Files are served directly. Hidden entries are skipped."""
     target = (base / rel_path).resolve() if rel_path else base
     if not target.is_relative_to(base) or not target.exists():
-        raise HTTPException(404, f"no such raw path: {rel_path}")
+        raise HTTPException(404, f"no such path: {rel_path}")
     if target.is_dir():
         files = []
         for p in sorted(target.rglob("*"), key=lambda p: p.as_posix().lower()):
@@ -496,14 +575,152 @@ def get_raw(name: str, request: Request, rel_path: str = ""):
             files.append({"path": rel.as_posix(),
                           "size": st.st_size, "mtime": st.st_mtime})
         if "text/html" in request.headers.get("accept", ""):
-            return HTMLResponse(_raw_index_html(name, rel_path, files))
-        return {"kb": name, "path": rel_path, "files": files}
+            return HTMLResponse(
+                _tree_index_html(title, url_prefix, files, note, extra_html))
+        return {**(json_extra or {}), "path": rel_path, "files": files}
     suffix = target.suffix.lower()
     if suffix in _RAW_BINARY_TYPES:
         return FileResponse(target, media_type=_RAW_BINARY_TYPES[suffix])
     if suffix in _WIKI_TEXT_EXTS:
         return PlainTextResponse(target.read_text(encoding="utf-8"))
     raise HTTPException(404, f"unsupported file type: {rel_path}")
+
+
+@app.get("/api/kb/{name}/raw")
+@app.get("/api/kb/{name}/raw/{rel_path:path}")
+def get_raw(name: str, request: Request, rel_path: str = ""):
+    """Read-only access to raw/ — the pristine ingested sources
+    (<stem>_pN_M.md chunks, .pages.json page arrays, _images/ crops,
+    archived PDFs) so external pipelines can pull them (ROADMAP P12:
+    feed a separate RAG). Hidden entries (.reocr_job* scratch dirs) are
+    skipped."""
+    try:
+        kb_dir = kb.resolve_kb(name)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    base = (kb_dir / "raw").resolve()
+    if not base.is_dir():
+        raise HTTPException(404, f"{name} has no raw/ yet")
+    kb_url = f"/api/kb/{quote(name)}"
+    return _serve_tree(
+        base, rel_path, request,
+        title=f"{name}/raw/{rel_path}".rstrip("/"),
+        url_prefix=f"{kb_url}/raw/",
+        note="Pristine ingested sources (OCR'd markdown chunks, page JSON,\n"
+             "image crops, archived PDFs). Click to download; images open for\n"
+             "viewing. Pipelines should request this URL with\n"
+             "<code>Accept: application/json</code> (curl's default) for a\n"
+             "machine-readable listing.",
+        extra_html=f'<p><a href="{kb_url}/sources.md"><b>Download all ingested '
+                   'chunks as one\nmarkdown file</b></a> <span class="note">'
+                   '(page order — for re-chunking in a\nvector RAG)</span></p>',
+        json_extra={"kb": name},
+    )
+
+
+# md-out run names come out of jobs._safe_stem, so this is the full alphabet.
+_MD_RUN_RE = re.compile(r"^[\w\-]+$")
+
+
+class MdOutCreate(BaseModel):
+    name: str
+
+
+@app.post("/api/md-out", status_code=201)
+def create_md_out(req: MdOutCreate):
+    """Create an empty markdown-only output, so it can be picked as the
+    stage-3 output before its first run fills it."""
+    name = jobs._safe_stem(req.name.strip()) if req.name.strip() else ""
+    if not name:
+        raise HTTPException(400, "output name required")
+    d = config.MD_OUT_DIR / name
+    if d.is_dir():
+        raise HTTPException(409, f"markdown output {name} already exists")
+    d.mkdir(parents=True)
+    return {"name": name}
+
+
+@app.get("/api/md-out")
+def get_md_out():
+    """Standalone OCR runs (md-out mode): one dir per run under
+    MD_OUT_DIR, produced by KB-less `full` jobs with dest="md-out"."""
+    runs = []
+    if config.MD_OUT_DIR.is_dir():
+        for d in sorted(config.MD_OUT_DIR.iterdir(), key=lambda d: d.name.lower()):
+            if not d.is_dir() or d.name.startswith("."):
+                continue
+            chunks = sum(1 for p in d.glob("*.md") if not p.stem.endswith("_src"))
+            files = sum(1 for p in d.rglob("*") if p.is_file())
+            runs.append({"name": d.name, "chunks": chunks, "files": files,
+                         "mtime": int(d.stat().st_mtime)})
+    return {"md_out_dir": str(config.MD_OUT_DIR), "runs": runs}
+
+
+@app.delete("/api/md-out/{name}")
+def delete_md_out(name: str):
+    """Move a project's markdown dir to trash/md-out/ (redo-the-OCR
+    path). Refused while the project has queued/running jobs."""
+    base = (config.MD_OUT_DIR / name).resolve()
+    if (not _MD_RUN_RE.match(name) or not base.is_dir()
+            or not base.is_relative_to(config.MD_OUT_DIR.resolve())):
+        raise HTTPException(404, f"no such markdown output: {name}")
+    if _project_busy(name):
+        raise HTTPException(409, f"project {name} has queued/running jobs — "
+                                 "wait for them or cancel them first")
+    return {"name": name, "trashed_to": str(_to_trash(base, "md-out"))}
+
+
+@app.get("/api/md-out/{name}")
+@app.get("/api/md-out/{name}/{rel_path:path}")
+def get_md_out_run(name: str, request: Request, rel_path: str = ""):
+    """Read-only access to one md-out run's artifacts — same browsing
+    contract as a KB's raw/ (JSON listing or a human download page)."""
+    base = (config.MD_OUT_DIR / name).resolve()
+    if (not _MD_RUN_RE.match(name) or not base.is_dir()
+            or not base.is_relative_to(config.MD_OUT_DIR.resolve())):
+        raise HTTPException(404, f"no such md-out run: {name}")
+    return _serve_tree(
+        base, rel_path, request,
+        title=f"md-out/{name}/{rel_path}".rstrip("/"),
+        url_prefix=f"/api/md-out/{quote(name)}/",
+        note="Standalone OCR output (markdown chunks, page JSON, image\n"
+             "crops) — not ingested into any KB. Click to download; images\n"
+             "open for viewing. Pipelines should request this URL with\n"
+             "<code>Accept: application/json</code> (curl's default) for a\n"
+             "machine-readable listing.",
+        json_extra={"run": name},
+    )
+
+
+@app.delete("/api/kb/{name}/site")
+def delete_site(name: str):
+    """Move a KB's published static site to trash/sites/. The KB's
+    `published` flag self-heals — it's derived from the sites dir."""
+    try:
+        kb.resolve_kb(name)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    site = (config.SITES_DIR / name).resolve()
+    if not site.is_dir() or not site.is_relative_to(config.SITES_DIR.resolve()):
+        raise HTTPException(404, f"{name} has no published site")
+    if _project_busy(name):
+        raise HTTPException(409, f"project {name} has queued/running jobs — "
+                                 "wait for them or cancel them first")
+    return {"name": name, "trashed_to": str(_to_trash(site, "sites"))}
+
+
+@app.get("/api/kb/{name}/docs")
+def kb_docs(name: str):
+    """Indexed doc stems (the engine's own list) — lets the UI tell
+    which markdown chunks are not yet ingested."""
+    try:
+        kb_dir = kb.resolve_kb(name)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    try:
+        return {"docs": sorted(jobs._indexed_stems(kb_dir))}
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
 
 
 @app.get("/api/kb/{name}/sources.md")
@@ -521,12 +738,8 @@ def get_sources_md(name: str):
     except RuntimeError as e:
         raise HTTPException(500, str(e))
 
-    def page_key(stem: str):
-        m = re.search(r"_p(\d+)", stem)
-        return (0, int(m.group(1)), stem) if m else (1, 0, stem.lower())
-
     parts = []
-    for stem in sorted(stems, key=page_key):
+    for stem in sorted(stems, key=jobs._page_key):
         p = kb_dir / "raw" / f"{stem}.md"
         if p.is_file():
             parts.append(f"<!-- source: {stem}.md -->\n\n"

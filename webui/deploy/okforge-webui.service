@@ -21,6 +21,8 @@ Restart=on-failure
 RestartSec=5
 # Config overrides (see webui/config.py) go here if ever needed, e.g.:
 # Environment=OPENKB_WEBUI_INBOX=/opt/okforge/inbox
+# Environment=OPENKB_WEBUI_MD_OUT=/opt/okforge/md-out
+# Environment=OPENKB_WEBUI_TRASH=/opt/okforge/trash
 
 [Install]
 WantedBy=multi-user.target
