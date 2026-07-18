@@ -8,9 +8,13 @@ setups where the LLM is your own llama.cpp/vLLM box, not a cloud API.
 
 The pipeline is five screens: **probe** (inspect the PDF: text layer?
 language? page count) → **pilot** (OCR a page or three, check the
-transcription and image crops before committing) → **KB setup** →
-**run** (chunked OCR → translate → add jobs with live progress) →
-**verify** (wiki browser, query console, site publishing).
+transcription and image crops before committing) → **project** (pick or
+name the project that collects the output) → **run** (chunked OCR →
+translate → markdown with live progress) → **verify & use** (review the
+markdown, ingest it into the project's knowledge base, then query and
+publish). OCR and ingestion are always separate steps, so the same tool
+doubles as a pure PDF→markdown converter — skip the ingest and take the
+files from `md-out/`.
 
 ## What's in the box
 
@@ -20,6 +24,16 @@ transcription and image crops before committing) → **KB setup** →
   keeps its log. One-click **resume/retry**, a **stall watchdog**
   (flags, never kills), per-chunk **ETA** from real history, and a git
   **pre-ingest snapshot** of the KB before every add.
+- **Markdown first, ingest second**: every run OCRs into the project's
+  `md-out/<name>/` folder (chunked `.md` + page maps + image crops);
+  ingesting that markdown into the knowledge base is a separate step —
+  a one-click button in the verify stage (KB stats update chunk by
+  chunk) or an auto-ingest toggle on the run. The KB is created on
+  first ingest — or never, if all you wanted was the markdown.
+- **Archive-first deletes**: removing an uploaded PDF, a project's
+  markdown, a published site, or a whole project **moves** it to
+  `trash/` (KBs retire to `kbs-retired/`) — nothing in the UI is
+  destructive, restore is a `mv` back.
 - **OCR + image extraction** via
   [okforge-vision-ocr](https://github.com/okforge/okforge-vision-ocr)
   (one VLM call per page: markdown transcription + photo bounding boxes
@@ -55,6 +69,9 @@ transcription and image crops before committing) → **KB setup** →
     okforge-webui/      ← this repo; .venv/ inside it
     kbs/<Subject>/      ← one self-contained knowledge base per subject
     inbox/              ← PDF drop point for the web UI
+    md-out/<Project>/   ← OCR'd markdown per project (created on demand)
+    kbs-retired/        ← retired KBs (archive-first "delete")
+    trash/              ← web-UI deletes move things here, never erase
     quartz/             ← shared Quartz install (site publishing, optional)
     sites/<Subject>/    ← published static sites (optional)
 ```
@@ -159,6 +176,9 @@ runs). `<base>` below means the directory this repo sits in:
 | `OPENKB_WEBUI_MODEL` | `openai/Qwen3.6-27B-MTP` | model string new KBs are initialized with (per-endpoint `model` overrides it) |
 | `OPENKB_WEBUI_KB_ROOT` | `<base>/kbs` | where KBs live |
 | `OPENKB_WEBUI_INBOX` | `<base>/inbox` | PDF drop dir |
+| `OPENKB_WEBUI_MD_OUT` | `<base>/md-out` | per-project OCR'd markdown |
+| `OPENKB_WEBUI_RETIRED_DIR` | `<base>/kbs-retired` | where retired KBs move |
+| `OPENKB_WEBUI_TRASH` | `<base>/trash` | where web-UI deletes move things |
 | `OPENKB_WEBUI_QUARTZ_DIR` | `<base>/quartz` | shared Quartz install |
 | `OPENKB_WEBUI_SITES_DIR` | `<base>/sites` | published-site output |
 | `OPENKB_WEBUI_PUBLIC_SITE_HOST` | `localhost` | public host for published sites' baseUrl |

@@ -1,8 +1,8 @@
 # Operating knowledge bases
 
 Day-to-day KB management, learned the practical way. Commands assume the
-layout from the README (`/opt/okforge/{tooling,kbs,inbox}`); adjust paths
-if yours differs. `<tooling>` means this repo's checkout,
+layout from the README (`/opt/okforge/{tooling,kbs,inbox,md-out,trash}`);
+adjust paths if yours differs. `<tooling>` means this repo's checkout,
 `<tooling>/.venv/bin/okforge` the engine CLI.
 
 ## Anatomy of a KB
@@ -25,22 +25,49 @@ request; nothing is "installed" beyond being in that directory.
 
 ## Create
 
-- **Web UI (stage 3)**: writes config + `.env` for the chosen endpoint,
-  registers the KB, and writes the `llm_extra_body` thinking off-switch
-  into the config automatically.
+- **Web UI (stage 3)**: creates a *project* — an `md-out/<name>/` folder
+  that collects the OCR'd markdown. The KB itself is initialized at the
+  project's **first ingest** (the stage-5 button or the stage-4
+  auto-ingest toggle): config + `.env` for the chosen endpoint, with the
+  `llm_extra_body` thinking off-switch written automatically. A project
+  whose markdown is never ingested never grows a KB — that's the
+  markdown-only mode.
 - **CLI**: `mkdir <Subject> && cd <Subject> && okforge init -m <model> -l en`
   (or `init --json` for scripts — fully non-interactive).
 
 ## Retire
 
-"Retire KB…" in the stage-3 KB info box (typed-name confirmation), or
-`DELETE /api/kbs/<name>`. Archive-first: the KB directory **moves** to
+"Retire KB…" in the stage-5 Knowledge base row (typed-name
+confirmation), or `DELETE /api/kbs/<name>`. Archive-first: the KB directory **moves** to
 `<base>/kbs-retired/<name>-<date>/` — nothing is deleted, git history
 and snapshots travel with it — and its entries leave the engine's
 global registry (`known_kbs`, and `default_kb` if it pointed there).
 Refused while the KB has queued/running jobs. Restore = move the
 directory back under `kbs/`. True deletion stays a deliberate manual
 `rm -rf` of the retired copy.
+
+## Deleting from the web UI (all archive-first)
+
+Every delete button in the UI **moves** — nothing is erased. Restore =
+move the file/directory back; emptying `trash/` is a deliberate manual
+act outside the UI.
+
+- **Delete PDF…** (stage 1): inbox PDF → `trash/inbox/`. Also purges the
+  file's *finished* job history from the queue, so a later re-upload of
+  the same file starts with a clean slate. Refused (409) while any
+  queued/running job still references the PDF. Finished runs and the KB
+  keep their results, but a later resume/re-OCR of that PDF fails with a
+  clear "source PDF no longer exists — restore it from trash/inbox/"
+  message until the file is put back.
+- **Delete markdown…** (stage 5, Markdown row): the project's
+  `md-out/<name>/` folder → `trash/md-out/` — for redoing the OCR from
+  scratch. Hidden while the project has no markdown.
+- **Remove site…** (stage 5): published site → `trash/sites/`; the KB
+  itself is untouched, re-publish rebuilds it.
+- **Retire KB…** (stage 5): KB → `kbs-retired/` (see Retire above).
+- **Delete project…** (stage-3 project info box, typed-name
+  confirmation): all of the above for one project in a single click —
+  site, then KB, then markdown.
 
 ## Pull raw sources (external RAG / pipelines)
 
@@ -124,14 +151,24 @@ llm_extra_body:
 
 ## Ingest lifecycle (webui)
 
-- A book run = one `full` job that expands into `ocr` → (`translate`) →
-  `add` children per chunk. The queue is strictly serial by design.
+- A book run = one `full` job that expands into `ocr` → (`translate`)
+  children per chunk, writing markdown into `md-out/<project>/`. The
+  queue is strictly serial by design.
+- **Ingestion is always a separate job**: `ingest_md` (the stage-5
+  button, or queued automatically when the run's auto-ingest toggle is
+  on) creates the KB if needed, copies new chunks into its `raw/`, and
+  expands into one `add` child per not-yet-indexed chunk, in page
+  order. Already-ingested chunks are skipped, so re-running it after
+  more OCR ingests only what's new.
+- While an ingest runs, the stage-5 **KB stats update as each chunk
+  lands** and **Publish is held** ("ingest in progress") until the last
+  chunk is in.
 - Every non-skipped `add` first **git-commits the KB** ("pre-ingest
   snapshot...") — a botched ingest is one `git reset --hard` away.
 - Every `add` ends by logging an `okf-lint` verdict.
 - **Resume**: the resume button on a full job re-plans the same range/chunk
-  size and skips chunks already indexed or on disk. Free no-op audit when
-  everything's done.
+  size and skips chunks already on disk (ingests skip chunks already
+  indexed). Free no-op audit when everything's done.
 - **Retry** on a child clones it to the *back* of the queue under the same
   parent; the old row keeps its terminal status forever.
 - **Stalled?** flag = running job with a log silent ≥ 20 min. Advisory only.
@@ -152,8 +189,11 @@ llm_extra_body:
   Refine the wording against a pilot page first; the pilot's hint
   carries into the run field one-way. Applies to pilot, run, and
   re-OCR jobs; ignored in text-layer mode (no OCR happens).
-- **Duplicate runs**: Start run warns if a full job for the same pdf+kb
-  is already active; full-job rows show "N/M chunks ingested".
+- **Duplicate runs**: Start run warns if a full job for the same
+  PDF + project is already active; a second ingest click while one is
+  in flight is a guarded no-op. Collapsed queue rows roll up progress
+  ("working — N/M chunks OCR'd" / "N/M chunks ingested"); ▸ expands
+  the technical child steps.
 
 ## What happens when you add the same info twice, or add new info later
 
