@@ -136,6 +136,26 @@ before any HTML exists.
 
 ## Roadmap
 
+- **Parallel OCR workers; ingest stays serial per KB.** The single
+  serial worker protects two different things that deserve different
+  treatment. Ingestion (`add`/`ingest_md`/`recompile`) must stay
+  serial *per KB* for correctness: every add plans against the current
+  wiki and rewrites shared concept/entity pages, so two concurrent
+  adds into the same KB clobber each other (the engine's per-KB lock
+  exists for this). OCR/translate/extract chunks, by contrast, are
+  pure per-chunk functions with disjoint outputs — safe to run N at
+  once, limited only by LLM-server slots. Shape: a small worker pool
+  where `ocr`/`translate`/`extract` jobs run concurrently up to a
+  per-endpoint slot budget, while ingest-family jobs funnel through
+  one worker per KB. Budget note: a single add already fans out up to
+  5 concurrent page-generation calls internally
+  (`DEFAULT_COMPILE_CONCURRENCY` in the engine's compiler), so OCR
+  workers sharing a host with an active ingest must count those slots
+  too — on a 2-slot host there is nothing to gain. Also touches:
+  per-chunk ETA math (assumes serial history), the stall watchdog,
+  and the queue UI's "one thing at a time" readability for beginners
+  (collapsed rollup rows already help).
+
 - **Chunk by natural document divisions, not fixed page counts.**
   Today a run splits a PDF every N pages, which can cut mid-chapter —
   a summary page then covers a fragment of one section plus the start
