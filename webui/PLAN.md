@@ -136,6 +136,17 @@ before any HTML exists.
 
 ## Roadmap
 
+- **MCP: read_topic parity for topic-tree KBs.** The engine's own MCP
+  server (`okforge mcp`) registers a `read_topic` tool when the bound
+  KB has `topic_tree: true` — top-down navigation of the concept tree.
+  The webui's `/mcp` server has no equivalent, so MCP clients lose
+  tree navigation on topic-tree KBs (grep/search still work, but
+  browsing concepts by topic doesn't). Add a
+  `read_topic(project, rel="")` tool that errors clearly on
+  flat-concepts KBs (per-project, unlike the engine's
+  register-conditionally trick, since one server covers all KBs);
+  reuse the engine's `read_topic_node` from `okforge.agent.tools`.
+
 - **Parallel OCR workers; ingest stays serial per KB.** The single
   serial worker protects two different things that deserve different
   treatment. Ingestion (`add`/`ingest_md`/`recompile`) must stay
