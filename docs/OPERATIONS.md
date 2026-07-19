@@ -134,7 +134,20 @@ inside the KB unwinds its summary, sources, and concept/entity contributions
 
 ## Per-KB LLM configuration
 
+The webui header's endpoint choice is written into the KB at **first
+ingest**; after that the KB's own files below decide which server every
+add, query, MCP `ask`, and auto-describe call hits — the header no
+longer matters for that KB.
+
 - `.env` — endpoint: `OPENAI_API_BASE=http://<llm-host>:8080/v1`, `LLM_API_KEY=no-key`.
+- **Repointing a KB** (LLM moved to a new box / new model): edit `.env`
+  (URL + key) and `config.yaml` (`model:`); the next call uses them —
+  no restart, nothing to re-register. Keep `llm_extra_body` right for
+  the new host (llama.cpp/Qwen: `chat_template_kwargs` thinking-off;
+  OpenRouter: `reasoning.enabled: false`). The stage-3 project box
+  shows the endpoint a KB currently points at. Live example:
+  FloridaHB913's `.env` pins its queries to a different GPU box than
+  the one that OCR'd it.
 - `.okforge/config.yaml` — `model`, `language`, and:
 
 ```yaml

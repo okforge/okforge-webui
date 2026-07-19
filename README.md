@@ -191,7 +191,9 @@ Everything below happens in the browser at `http://<host>:8500/`.
 
 1. **Check the header.** Pick your LLM server in the dropdown; the
    status light beside it polls the server, so a steady light means
-   you're actually talking to it.
+   you're actually talking to it. This choice gets baked into the
+   knowledge base at first ingest (queries and MCP clients then use it
+   too — [changeable later](#how-the-endpoint-choice-binds-to-a-kb)).
 2. **Stage 1 — get a document in.** Upload a short PDF — or a few
    phone photos of pages, which combine into one PDF (the panel shows
    the page order before anything uploads; it comes from the file
@@ -270,8 +272,27 @@ key lives in plain text in the unit file/environment — acceptable on a
 single-operator LAN box; protect the systemd drop-in accordingly
 (`chmod 640`).
 
-Each KB additionally carries its own `.env` (`OPENAI_API_BASE`,
-`LLM_API_KEY`) and `config.yaml`. One setting matters more than all the
+### How the endpoint choice binds to a KB
+
+The endpoint picked in the header is **baked into each knowledge base
+at first ingest**: that's when the KB's own `.env` (`OPENAI_API_BASE`,
+`LLM_API_KEY`) and `config.yaml` (`model`, thinking-off block) are
+written. From then on, everything that touches that KB — later
+ingests, the stage-5 Ask box, and the MCP server's `ask` tool — uses
+the **KB's own endpoint**, regardless of what the header currently
+shows. (The header selection still drives OCR/translate runs, which
+produce markdown before any KB exists.) So two KBs on one machine can
+happily run against two different LLM servers, and an MCP client
+querying a project lights up whichever server that project pins.
+
+To **repoint an existing KB** (LLM moved to a new box, or a new
+model): edit those two files in the KB directory — `.env` for the URL
+and key, `config.yaml` for `model:` — and the next call uses them; no
+restart, nothing to re-register. Keep the `llm_extra_body` block
+appropriate for the new host (see below). The stage-3 project info box
+shows which endpoint a KB currently points at.
+
+One setting matters more than all the
 others on llama.cpp hosts serving Qwen-family models with thinking
 enabled by default — without it every ingest silently pays a hidden
 reasoning block (measured: a 2-minute add becomes 27):
