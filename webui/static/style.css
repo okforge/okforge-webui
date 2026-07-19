@@ -31,6 +31,7 @@ header {
   top: 0;
   z-index: 10;
 }
+header .logo { height: 28px; align-self: center; margin-right: -.4rem; }
 header h1 { font-size: 1.15rem; margin: 0; }
 .hdr-right { margin-left: auto; display: flex; align-items: center; gap: .5rem; }
 .hdr-label { font-size: .85rem; color: var(--muted); }
