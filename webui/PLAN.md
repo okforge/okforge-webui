@@ -184,15 +184,7 @@ before any HTML exists.
   but the page↔timestamp citation convention depends on fixed blocks,
   so transcripts need more thought before changing.
 
-- **Auto-generate the project description** (the MCP 'about' line).
-  Today only a manual `okforge describe "<text>"` sets it; a KB
-  without one falls back to concatenated document one-liners from
-  `index.md`, which can surface junk ("Blank page with no
-  transcribable content") and misleads MCP clients picking a project
-  by 'about' text. Preferred hook: when an add job completes and the
-  KB has **no** curated description, run one LLM call over the
-  `index.md` document list to draft a one-liner and set it — never
-  overwrite a hand-curated line. Alternative/companion: seed a
-  placeholder description at KB creation so the raw fallback never
-  shows. See `docs/MCP_CLIENT_PROMPT.md` for why the 'about' line
-  matters.
+- ~~**Auto-generate the project description**~~ Done 2026-07-19: a
+  `describe` job runs after every ingest — one LLM call over the
+  `index.md` document list sets the description; curated lines
+  (detected via the `description.auto` sidecar) are never overwritten.

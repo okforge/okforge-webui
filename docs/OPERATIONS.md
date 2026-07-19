@@ -146,8 +146,13 @@ llm_extra_body:
     enable_thinking: false
 ```
 
-- Curated project description (preferred by MCP `list_projects` over the
-  doc-summary guess): `okforge describe "One line about the whole project."`
+- Project description (the MCP `list_projects` 'about' line): the webui
+  **auto-writes one after every ingest** — a `describe` job runs one LLM
+  call over the index.md document list and refreshes the line as the KB
+  grows. Curate it any time with
+  `okforge describe "One line about the whole project."` — a curated
+  line is detected (it no longer matches the `description.auto` sidecar
+  in the state dir) and never overwritten.
 
 ## Ingest lifecycle (webui)
 

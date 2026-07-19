@@ -53,6 +53,49 @@ def _read_env_endpoint(kb_dir: Path) -> str | None:
     return None
 
 
+def read_env_key(kb_dir: Path) -> str | None:
+    """The KB's own LLM API key from its .env (None for keyless local)."""
+    env = kb_dir / ".env"
+    if not env.is_file():
+        return None
+    for line in env.read_text(encoding="utf-8").splitlines():
+        if line.startswith("LLM_API_KEY="):
+            key = line.split("=", 1)[1].strip()
+            return key or None
+    return None
+
+
+def read_config(kb_dir: Path) -> dict:
+    """The KB's .okforge/config.yaml as a dict ({} if absent/broken)."""
+    cfg_path = config.state_dir(kb_dir) / "config.yaml"
+    if cfg_path.is_file():
+        try:
+            return yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            return {}
+    return {}
+
+
+def doc_snippets(kb_dir: Path, limit: int = 40) -> list[str]:
+    """Document one-liners from wiki/index.md's "## Documents" section
+    ("<name> — <one-liner>" bullets) — the raw material for project
+    descriptions, both the MCP fallback and the auto-describe job."""
+    idx = kb_dir / "wiki" / "index.md"
+    if not idx.is_file():
+        return []
+    out = []
+    in_docs = False
+    for line in idx.read_text(encoding="utf-8").splitlines():
+        if line.startswith("## "):
+            in_docs = line.startswith("## Documents")
+            continue
+        if in_docs and line.lstrip().startswith("- "):
+            out.append(line.lstrip()[2:].strip())
+            if len(out) >= limit:
+                break
+    return out
+
+
 def endpoint_label(kb_dir: Path) -> str | None:
     """The configured endpoint this KB points at, from its .env's
     OPENAI_API_BASE — None if the URL matches no current endpoint."""
@@ -102,10 +145,7 @@ def _count_citations(wiki_dir: Path) -> int:
 
 
 def kb_info(kb_dir: Path) -> dict:
-    cfg = {}
-    cfg_path = config.state_dir(kb_dir) / "config.yaml"
-    if cfg_path.is_file():
-        cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    cfg = read_config(kb_dir)
     endpoint_url = _read_env_endpoint(kb_dir)
     endpoint = endpoint_label(kb_dir)
     wiki = kb_dir / "wiki"
@@ -114,6 +154,7 @@ def kb_info(kb_dir: Path) -> dict:
         "path": str(kb_dir),
         "model": cfg.get("model"),
         "language": cfg.get("language"),
+        "description": (str(cfg.get("description") or "").strip() or None),
         "endpoint": endpoint,
         "endpoint_url": endpoint_url,
         "docs": _count(wiki / "summaries"),

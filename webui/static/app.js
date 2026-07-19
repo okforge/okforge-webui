@@ -465,7 +465,9 @@ function selectProject(name) {
       <span class="muted">model ${esc(k.model || '?')} · lang ${esc(k.language || '?')} ·
       endpoint ${esc(k.endpoint || k.endpoint_url || '?')} ·
       ${k.docs} docs · ${k.concepts} concepts · ${k.entities} entities ·
-      ${k.images} images · ${k.raw_files} raw files</span>`;
+      ${k.images} images · ${k.raw_files} raw files</span>` +
+      (k.description ? `<br><span class="muted"
+        title="The project description — what MCP clients see when picking a knowledge base. Auto-written after each ingest; curate it with: okforge describe">“${esc(k.description)}”</span>` : '');
   } else {
     box.classList.remove('hidden');
     box.innerHTML = `
@@ -911,6 +913,7 @@ const JOB_TYPE_LABELS = {
   translate: 'translate', reocr: 're-OCR page', recompile: 're-ingest chunk',
   pilot: 'pilot', extract: 'extract text', publish: 'Publish site',
   ingest_md: 'Ingest into knowledge base',
+  describe: 'write project description',
 };
 
 function jobTypeLabel(j) {

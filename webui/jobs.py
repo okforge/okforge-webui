@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 """
 
 JOB_TYPES = {"pilot", "ocr", "translate", "add", "full", "reocr", "extract",
-             "publish", "recompile", "ingest_md"}
+             "publish", "recompile", "ingest_md", "describe"}
 TERMINAL = {"done", "failed", "cancelled"}
 
 # A running job whose log has been silent this long is flagged as stalled
@@ -971,6 +971,79 @@ def _expand_ingest(job: dict) -> None:
         _log_line(job["id"], f"queued add job #{child['id']} for {md.name}")
         queued += 1
     _log_line(job["id"], f"OK: {queued} add job(s) queued")
+    # Serial queue: this child runs after every add above has landed.
+    # Skipped when nothing new went in AND a description already exists
+    # (regenerating on a no-op ingest would waste an LLM call).
+    has_desc = bool(str(kbmod.read_config(kb_dir).get("description")
+                        or "").strip())
+    if queued or not has_desc:
+        child = enqueue("describe", {}, kb_name=job["kb"], parent=job["id"])
+        _log_line(job["id"],
+                  f"queued describe job #{child['id']} (project description)")
+
+
+def _run_describe(job: dict) -> None:
+    """Auto-generate the project description (the MCP 'about' line):
+    one LLM call over the index.md document list, run after every
+    ingest. Curated descriptions are sacred — the generated text is
+    mirrored in <state>/description.auto, and if config.yaml's
+    description no longer matches that sidecar a human wrote it and
+    this job leaves it alone. Auto ones refresh as the KB grows."""
+    kb_dir = kbmod.resolve_kb(job["kb"])
+    cfg = kbmod.read_config(kb_dir)
+    current = str(cfg.get("description") or "").strip()
+    sidecar = config.state_dir(kb_dir) / "description.auto"
+    previous_auto = (sidecar.read_text(encoding="utf-8").strip()
+                     if sidecar.is_file() else "")
+    if current and current != previous_auto:
+        _log_line(job["id"], "curated description present — leaving it alone")
+        return
+    snippets = kbmod.doc_snippets(kb_dir)
+    if not snippets:
+        _log_line(job["id"], "no documents in index.md yet — nothing to describe")
+        return
+    base = kbmod._read_env_endpoint(kb_dir)
+    model = cfg.get("model")
+    if not base or not model:
+        _log_line(job["id"], "KB has no endpoint/model configured — skipping")
+        return
+    doc_list = "\n".join(snippets)[:4000]
+    prompt = (
+        f"These are the documents in a knowledge base named "
+        f"'{kb_dir.name}':\n\n{doc_list}\n\n"
+        "Write ONE plain-text sentence (at most 50 words) describing what "
+        "this knowledge base covers as a whole. It will be shown to AI "
+        "clients choosing which knowledge base to query. No preamble, no "
+        "quotes, no markdown — just the sentence."
+    )
+    # Raw OpenAI protocol like the OCR tools: strip the LiteLLM provider
+    # prefix; carry the KB's llm_extra_body (the thinking off-switch).
+    payload = {"model": model.split("/", 1)[-1], "max_tokens": 200,
+               "messages": [{"role": "user", "content": prompt}]}
+    payload.update(cfg.get("llm_extra_body") or {})
+    headers = {}
+    key = kbmod.read_env_key(kb_dir)
+    if key and key != "no-key":
+        headers["Authorization"] = f"Bearer {key}"
+    _log_line(job["id"],
+              f"asking {base} for a description ({len(snippets)} doc(s))...")
+    import httpx
+    r = httpx.post(base.rstrip("/") + "/chat/completions",
+                   headers=headers, json=payload, timeout=180)
+    r.raise_for_status()
+    text = " ".join(
+        r.json()["choices"][0]["message"]["content"].split()).strip(' "\'')
+    if not text:
+        raise RuntimeError("LLM returned an empty description")
+    text = text[:400]
+    rc = _run_logged(job["id"],
+                     [str(config.OPENKB_BIN), "--kb-dir", str(kb_dir),
+                      "describe", text],
+                     cwd=kb_dir)
+    if rc != 0:
+        raise RuntimeError(f"okforge describe exited {rc}")
+    sidecar.write_text(text + "\n", encoding="utf-8")
+    _log_line(job["id"], f"description set: {text}")
 
 
 def _run_recompile(job: dict) -> None:
@@ -1087,6 +1160,7 @@ _RUNNERS = {
     "publish": _run_publish,
     "recompile": _run_recompile,
     "ingest_md": _expand_ingest,
+    "describe": _run_describe,
 }
 
 

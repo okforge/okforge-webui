@@ -17,7 +17,6 @@ import os
 import re
 from pathlib import Path
 
-import yaml
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -97,28 +96,11 @@ def _about(kb_dir: Path) -> str | None:
     Prefers the curated project-level description in .okforge/config.yaml
     (set via `okforge describe`) — the doc-summary fallback misleads once a
     project holds many books."""
-    cfg_path = config.state_dir(kb_dir) / "config.yaml"
-    if cfg_path.is_file():
-        try:
-            cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
-            curated = str(cfg.get("description") or "").strip()
-            if curated:
-                return curated[:400]
-        except yaml.YAMLError:
-            pass
-    idx = kb_dir / "wiki" / "index.md"
-    if not idx.is_file():
-        return None
-    snippets = []
-    in_docs = False
-    for line in idx.read_text(encoding="utf-8").splitlines():
-        if line.startswith("## "):
-            in_docs = line.startswith("## Documents")
-            continue
-        if in_docs and line.lstrip().startswith("- ") and "—" in line:
-            snippets.append(line.split("—", 1)[1].strip())
-            if len(snippets) >= 4:
-                break
+    curated = str(kb.read_config(kb_dir).get("description") or "").strip()
+    if curated:
+        return curated[:400]
+    snippets = [s.split("—", 1)[1].strip()
+                for s in kb.doc_snippets(kb_dir, limit=8) if "—" in s][:4]
     return " ".join(snippets)[:400] or None
 
 
