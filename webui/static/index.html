@@ -31,7 +31,9 @@
     <button id="inbox-refresh" class="small"
       title="Reset: re-scan the inbox, clear the selection and probe info, and clear finished jobs from the queue (tick 'show all KBs' to see them again)">&#8635;</button>
     <span class="or">or</span>
-    <input type="file" id="upload-file" accept=".pdf">
+    <input type="file" id="upload-file"
+      accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.bmp"
+      title="A PDF, or a single page-scan image (jpg/png/tif/bmp) — images are wrapped into a one-page PDF on upload">
     <button id="upload-btn">Upload</button>
     <progress id="upload-progress" class="hidden" max="100" value="0"></progress>
     <button id="pdf-delete-btn" class="small danger"
@@ -143,6 +145,10 @@
     <div class="row">
       <span id="md-summary" class="muted"></span>
       <a id="md-browse-link" target="_blank" rel="noopener">browse / download all files</a>
+      <input type="file" id="md-add-file" class="hidden" multiple
+        accept=".md,.markdown,.txt">
+      <button id="md-add-btn" class="small"
+        title="Add your own markdown or plain-text documents to this project — no OCR involved. They land in the project's markdown folder and are ingested by the same button as OCR'd chunks.">Add markdown&hellip;</button>
       <button id="md-ingest-btn" class="small"
         title="Ingest every markdown chunk that isn't in the knowledge base yet — the KB is created on first ingest; already-ingested chunks are skipped">Ingest md &#8594; knowledge base</button>
       <button id="md-delete-btn" class="small danger"

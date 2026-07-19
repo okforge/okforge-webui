@@ -95,23 +95,45 @@ def delete_pdf(name: str):
     return {"name": p.name, "trashed_to": str(trashed), "purged_jobs": purged}
 
 
+# Image scans are welcome too: wrapped into a one-page PDF at upload so
+# the whole probe→pilot→OCR pipeline runs unchanged (the engine itself
+# takes no images — OCR is the only road in for them).
+_IMAGE_UPLOAD_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
+
+
 @app.post("/api/inbox")
 async def upload_pdf(file: UploadFile):
     name = Path(file.filename or "").name
-    if not name.lower().endswith(".pdf"):
-        raise HTTPException(400, "only .pdf uploads are accepted")
-    dest = config.INBOX_DIR / name
+    suffix = Path(name).suffix.lower()
+    if suffix != ".pdf" and suffix not in _IMAGE_UPLOAD_EXTS:
+        raise HTTPException(400, "only .pdf uploads (or page-scan images: "
+                                 "jpg / png / tif / bmp) are accepted")
+    is_image = suffix != ".pdf"
+    dest = config.INBOX_DIR / (Path(name).stem + ".pdf" if is_image else name)
     if dest.exists():
-        raise HTTPException(409, f"{name} already exists in the inbox")
+        raise HTTPException(409, f"{dest.name} already exists in the inbox")
+    tmp = dest.with_name(dest.name + ".part") if is_image else dest
     try:
-        with dest.open("wb") as out:
+        with tmp.open("wb") as out:
             while chunk := await file.read(1 << 20):
                 out.write(chunk)
+        if is_image:
+            import pymupdf
+            try:
+                with pymupdf.open(str(tmp)) as img:
+                    pdf_bytes = img.convert_to_pdf()
+            except Exception:
+                raise HTTPException(400, f"{name}: not a readable image")
+            dest.write_bytes(pdf_bytes)
     except Exception:
         dest.unlink(missing_ok=True)
+        if is_image:
+            tmp.unlink(missing_ok=True)
         raise
+    if is_image:
+        tmp.unlink(missing_ok=True)
     st = dest.stat()
-    return {"name": name, "path": str(dest), "size": st.st_size}
+    return {"name": dest.name, "path": str(dest), "size": st.st_size}
 
 
 # ---------------------------------------------------------------- probe
@@ -638,6 +660,51 @@ def create_md_out(req: MdOutCreate):
         raise HTTPException(409, f"markdown output {name} already exists")
     d.mkdir(parents=True)
     return {"name": name}
+
+
+_MD_UPLOAD_EXTS = {".md", ".markdown", ".txt"}
+
+
+@app.post("/api/md-out/{name}/files", status_code=201)
+async def add_md_files(name: str, files: list[UploadFile]):
+    """Add hand-made markdown/text documents to a project — the no-OCR
+    input path. Saved as <safe-stem>.md in md-out/<name>/, where the
+    normal ingest flow picks them up like any OCR'd chunk. All files
+    are validated before any is written, so a rejected batch changes
+    nothing."""
+    if not _MD_RUN_RE.match(name):
+        raise HTTPException(404, f"no such project: {name}")
+    dest_dir = config.MD_OUT_DIR / name
+    plan = []
+    seen = set()
+    for f in files:
+        src = Path(f.filename or "").name
+        if Path(src).suffix.lower() not in _MD_UPLOAD_EXTS:
+            raise HTTPException(400, f"{src or '(unnamed)'}: only "
+                                     ".md / .markdown / .txt files are accepted "
+                                     "— pre-convert other formats to markdown")
+        stem = jobs._safe_stem(Path(src).stem)
+        dest = dest_dir / f"{stem}.md"
+        if dest.exists() or stem in seen:
+            raise HTTPException(409, f"{stem}.md already exists in project "
+                                     f"{name} — delete the project's markdown "
+                                     "or rename the file")
+        seen.add(stem)
+        plan.append((f, dest))
+    # KB-only projects (created before md-out existed, or by the engine
+    # CLI) have no markdown dir yet — first upload creates it.
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    added = []
+    for f, dest in plan:
+        try:
+            with dest.open("wb") as out:
+                while chunk := await f.read(1 << 20):
+                    out.write(chunk)
+        except Exception:
+            dest.unlink(missing_ok=True)
+            raise
+        added.append(dest.name)
+    return {"added": added}
 
 
 @app.get("/api/md-out")

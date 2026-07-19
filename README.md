@@ -16,6 +16,11 @@ publish). OCR and ingestion are always separate steps, so the same tool
 doubles as a pure PDF→markdown converter — skip the ingest and take the
 files from `md-out/`.
 
+Inputs: PDFs, single page-scan images (jpg/png/tif/bmp — wrapped into a
+one-page PDF on upload so the OCR pipeline handles them), and your own
+markdown/text documents (added straight to a project, no OCR). Other
+formats (docx, pptx, html …) should be pre-converted to markdown first.
+
 ## What's in the box
 
 - **Serial job queue** (sqlite + one worker, on purpose): one `add` or
@@ -26,6 +31,8 @@ files from `md-out/`.
   **pre-ingest snapshot** of the KB before every add.
 - **Markdown first, ingest second**: every run OCRs into the project's
   `md-out/<name>/` folder (chunked `.md` + page maps + image crops);
+  hand-made markdown/text files can be added to the same folder from
+  the UI ("Add markdown…" — no OCR involved);
   ingesting that markdown into the knowledge base is a separate step —
   a one-click button in the verify stage (KB stats update chunk by
   chunk) or an auto-ingest toggle on the run. The KB is created on

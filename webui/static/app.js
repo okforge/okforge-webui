@@ -634,7 +634,8 @@ async function renderVerifyMd() {
     $('#md-browse-link').classList.add('hidden');
     $('#md-delete-btn').classList.add('hidden');
     list.replaceChildren(el('div', {class: 'muted',
-      text: 'no markdown yet — start a run in stage 4 and the chunks appear here'}));
+      text: 'no markdown yet — start a run in stage 4, or use "Add ' +
+            'markdown…" to bring your own files'}));
   };
   let d;
   try {
@@ -674,6 +675,24 @@ async function renderVerifyMd() {
       row.append(el('span', {class: 'muted', text: '· not ingested yet'}));
     list.append(row);
   }
+}
+
+// Hand-made markdown/text straight into the project — the no-OCR input
+// path. Files land in md-out/<project>/ and the normal ingest button
+// picks them up like any OCR'd chunk.
+async function addMdFiles() {
+  const input = $('#md-add-file');
+  const files = [...input.files];
+  input.value = '';  // else re-picking the same files fires no change event
+  if (!state.project || !files.length) return;
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f);
+  const d = await api(`/api/md-out/${encodeURIComponent(state.project)}/files`,
+                      {method: 'POST', body: fd});
+  toast(`added ${d.added.length} file(s) to ${state.project} — ` +
+        'ingest them from this panel when ready', 'info');
+  renderVerifyMd().catch(() => {});
+  loadKbs(state.project).catch(() => {});  // md-only project counts changed
 }
 
 async function ingestMdRun() {
@@ -1485,6 +1504,8 @@ function init() {
   $('#run-to').oninput = updateChunkPlan;
   $('#run-btn').onclick = () => startRun().catch(e => toast(e.message));
   $('#md-ingest-btn').onclick = () => ingestMdRun().catch(e => toast(e.message));
+  $('#md-add-btn').onclick = () => $('#md-add-file').click();
+  $('#md-add-file').onchange = () => addMdFiles().catch(e => toast(e.message));
   $('#pdf-delete-btn').onclick = () => deletePdf().catch(e => toast(e.message));
   $('#md-delete-btn').onclick = () => deleteMd().catch(e => toast(e.message));
   $('#site-delete-btn').onclick = () => deleteSite().catch(e => toast(e.message));

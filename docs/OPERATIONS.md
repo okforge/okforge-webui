@@ -160,6 +160,13 @@ llm_extra_body:
   expands into one `add` child per not-yet-indexed chunk, in page
   order. Already-ingested chunks are skipped, so re-running it after
   more OCR ingests only what's new.
+- **Bring-your-own markdown**: "Add markdown…" (stage 5, Markdown row)
+  uploads `.md`/`.txt` files straight into `md-out/<project>/` — no OCR
+  — where the same ingest button treats them like any OCR'd chunk
+  (`.txt` is saved as `.md`; duplicate names are refused). Single
+  page-scan images (jpg/png/tif/bmp) go the other way: the stage-1
+  upload wraps them into a one-page PDF so the normal OCR pipeline
+  applies.
 - While an ingest runs, the stage-5 **KB stats update as each chunk
   lands** and **Publish is held** ("ingest in progress") until the last
   chunk is in.
