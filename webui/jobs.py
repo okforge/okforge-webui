@@ -735,6 +735,51 @@ def _run_add(job: dict) -> None:
     if rc != 0:
         raise RuntimeError(f"openkb add exited {rc}")
     _okf_lint_after_add(job["id"], kb_dir)
+    _reroll_if_empty(job, kb_dir, path, cmd)
+
+
+def _reroll_if_empty(job: dict, kb_dir: Path, path: Path,
+                     add_cmd: list[str]) -> None:
+    """Engine nondeterminism guard: the concepts-plan LLM call can
+    return a valid-but-EMPTY plan — the add prints [OK], lint is clean,
+    but the doc lands with zero concepts/entities (seen live
+    2026-07-18 job 607 and 2026-07-19 job 649). When the whole wiki is
+    still concept- and entity-free after an add, that's almost
+    certainly the bug, not judgment — re-roll ONCE (remove --keep-raw
+    + re-add). Bounded at one: a blank document is legitimately
+    concept-free, and a near-deterministic model (prefix-cached plan
+    prompt, low temperature) can return the same empty plan every
+    roll — job 651 did — so looping would only burn LLM calls."""
+    wiki = kb_dir / "wiki"
+    if kbmod._count(wiki / "concepts") + kbmod._count(wiki / "entities") > 0:
+        return
+    _log_line(job["id"],
+              "[WARN] 0 concepts and 0 entities after add — the engine's "
+              "concepts-plan likely returned an empty plan; re-rolling once")
+    doc_name = _safe_stem(path.stem)
+    proc = subprocess.run(
+        [str(config.OPENKB_BIN), "--kb-dir", str(kb_dir),
+         "remove", doc_name, "--keep-raw", "--yes"],
+        cwd=kb_dir, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+        timeout=600,
+    )
+    for line in (proc.stdout + proc.stderr).splitlines():
+        _log_line(job["id"], line)
+    if proc.returncode != 0:
+        _log_line(job["id"],
+                  f"remove exited {proc.returncode} — continuing; the re-add "
+                  "will skip if the doc is somehow still indexed")
+    rc = _run_logged(job["id"], add_cmd, cwd=kb_dir)
+    if rc != 0:
+        raise RuntimeError(f"openkb add (re-roll) exited {rc}")
+    _okf_lint_after_add(job["id"], kb_dir)
+    if kbmod._count(wiki / "concepts") + kbmod._count(wiki / "entities") > 0:
+        _log_line(job["id"], "re-roll recovered: concepts/entities present now")
+    else:
+        _log_line(job["id"],
+                  "[WARN] still 0 concepts/entities after the re-roll — a "
+                  "blank/empty document is legitimately concept-free; "
+                  "otherwise use \"Re-ingest chunk\" (stage 4) to roll again")
 
 
 def _snapshot_kb(job_id: int, kb_dir: Path, label: str) -> None:

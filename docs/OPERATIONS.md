@@ -185,6 +185,14 @@ llm_extra_body:
 - Every non-skipped `add` first **git-commits the KB** ("pre-ingest
   snapshot...") — a botched ingest is one `git reset --hard` away.
 - Every `add` ends by logging an `okf-lint` verdict.
+- **Empty-plan guard**: if an add finishes with the KB still at zero
+  concepts AND zero entities (the engine's concepts-plan LLM call can
+  return a valid-but-empty plan and report success), the add job
+  automatically re-rolls the doc once (remove `--keep-raw` + re-add)
+  and logs `[WARN]` lines either way. Bounded at one retry — a blank
+  document is legitimately concept-free, and a near-deterministic
+  model can return the same empty plan every roll; the manual roll is
+  "Re-ingest chunk" (stage 4).
 - **Resume**: the resume button on a full job re-plans the same range/chunk
   size and skips chunks already on disk (ingests skip chunks already
   indexed). Free no-op audit when everything's done.
@@ -409,6 +417,11 @@ calls per document, zero failed adds.
 - **Adds suddenly much slower**: check thinking got re-enabled (missing
   `llm_extra_body` block in a new KB) or the model was reloaded with a
   different preset (`curl -s http://<llm-host>:8080/props`).
+- **A doc lands with 0 concepts / 0 entities and the add log has no
+  "Generating N concept(s)" lines**: the opposite concepts-plan failure
+  — a valid-but-empty plan. First-doc adds auto-re-roll once (see
+  Ingest lifecycle); if the `[WARN] still 0` line shows and the doc has
+  real content, "Re-ingest chunk" (stage 4) rolls again manually.
 - **One add takes 5× normal and the log shows hundreds of entities
   planned**: a runaway concepts-plan — the model degenerated into a
   10k+-token plan requesting hundreds of entities (normal: ~10). The
