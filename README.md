@@ -66,6 +66,12 @@ pre-converted to markdown first.
 
 ## Prerequisites
 
+- **An OpenAI-compatible LLM endpoint** — the whole pipeline's brain
+  (llama.cpp or vLLM on your own hardware, or a hosted service; see
+  Configuration). For the OCR path the endpoint's model must be
+  **vision-capable** (Qwen-VL family or similar) — it reads page
+  images. Text-layer extraction, ingestion, and querying work with any
+  capable chat model.
 - **Python 3.10+**
 - **Git** — for the clone; on Windows it also provides the `grep`
   binary the engine's query agent uses.
@@ -148,6 +154,10 @@ cd <base>/okforge-webui
 trust model in every mode: LAN-only, no auth — don't expose it beyond a
 network you trust.
 
+First time? Follow the
+[small-test walkthrough](#first-run--start-with-a-small-test) below
+before pointing it at a whole book.
+
 To run it as a service: on Linux,
 [`webui/deploy/okforge-webui-standalone.service`](webui/deploy/okforge-webui-standalone.service)
 is a ready-to-edit systemd unit; on Windows, use Task Scheduler
@@ -170,6 +180,54 @@ backend, so **never while a job is running**). In this mode frontend
 files are served by Apache, so frontend-only changes are
 `sudo rsync -a --delete webui/static/ /var/www/okforge-webui/`
 (standalone mode serves them straight from the repo — nothing to copy).
+
+## First run — start with a small test
+
+Prove the whole loop — endpoint, OCR quality, ingest, query — on a
+handful of pages before committing to a book. Five pages take about ten
+minutes on a local GPU; a 300-page book is an overnight-plus run (see
+[ingest cost](docs/OPERATIONS.md#ingest-cost-at-collection-scale-measured)).
+Everything below happens in the browser at `http://<host>:8500/`.
+
+1. **Check the header.** Pick your LLM server in the dropdown; the
+   status light beside it polls the server, so a steady light means
+   you're actually talking to it.
+2. **Stage 1 — get a document in.** Upload a short PDF — or a few
+   phone photos of pages, which combine into one PDF (the panel shows
+   the page order before anything uploads; it comes from the file
+   names). The probe runs automatically: **scan** means the OCR
+   pipeline (the normal path), **text** means an embedded text layer
+   you can optionally trust in stage 4.
+3. **Stage 2 — pilot one page.** Enter one page number with real
+   content on it (not the cover) and *Run pilot*. Read the
+   transcription beside the rendered page; check the image crops. Bad
+   OCR here means bad OCR everywhere, so fix it now — *table mode* for
+   complex tables, *--figures* if line drawings were missed, or an OCR
+   hint ("ignore marginalia"). Re-run until the page reads right.
+4. **Stage 3 — create a project.** Use a throwaway name like
+   `MyBook-test` — you'll delete it after the test (one click, and
+   nothing is ever erased — it all moves to `trash/`).
+5. **Stage 4 — run a small range.** Set *From page / to* to a few
+   content pages, tick *ingest into KB when OCR finishes*, and *Start
+   run*. The queue shows one plain-language row ("working — n/m chunks
+   OCR'd"; ▸ expands the technical steps) and markdown appears in
+   stage 5 as chunks finish.
+6. **Stage 5 — verify and ask.** Read the markdown. Watch the
+   knowledge-base stats tick up as chunks ingest; a one-line project
+   description is written automatically at the end, and *Publish*
+   unlocks when the last chunk is in. Then ask the knowledge base a
+   question — answers cite source pages as (p. N).
+7. **Happy? Delete the test and run for real.** *Delete project…* in
+   stage 3, then repeat with the real project name and the full page
+   range. (If you'd rather keep the test: make its range exactly the
+   first chunk — e.g. pages 1–20 at the default 20 pages per chunk —
+   and the full run will skip it instead of re-OCRing it.)
+
+What a small test catches early: a wrong endpoint or non-vision model
+(pilot fails or returns junk), OCR quirks your document needs hints
+for, and a misconfigured model paying a hidden reasoning block on every
+call — a 20-page chunk should ingest in a couple of minutes on a local
+27B model, not 27 (see the `llm_extra_body` note below).
 
 ## Configuration
 
@@ -238,6 +296,8 @@ for the measured figures before planning a multi-day run.
 
 ## Docs
 
+- **First run**: the [small-test walkthrough](#first-run--start-with-a-small-test)
+  above is the intended on-ramp.
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — operating KBs day to day:
   anatomy, copying between machines, re-ingest semantics (what happens
   when you add the same document twice), Obsidian editing safety, Quartz
