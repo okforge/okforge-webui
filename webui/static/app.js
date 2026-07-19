@@ -145,15 +145,33 @@ function updateUploadControls() {
 // the new file (programmatic .value changes fire no change event).
 function pdfSelectionChanged(newValue) {
   updateUploadControls();
-  if (!state.pdf || newValue === state.pdf) return;
-  state.pdf = null;
-  state.probe = null;
-  $('#probe-result').classList.add('hidden');
-  $('#pilot-review').classList.add('hidden');
-  $('#pilot-logbox').classList.add('hidden');
-  $('#pilot-status').textContent = '';
-  updateStageGates();
-  saveSession();
+  const changed = !!newValue && newValue !== state.pdf;
+  if (state.pdf && newValue !== state.pdf) {
+    state.pdf = null;
+    state.probe = null;
+    $('#probe-result').classList.add('hidden');
+    $('#pilot-review').classList.add('hidden');
+    $('#pilot-logbox').classList.add('hidden');
+    $('#pilot-status').textContent = '';
+    updateStageGates();
+    saveSession();
+  }
+  // A new document while stage 3 still holds a project is an easy trap:
+  // the next run would quietly land in the old project. One blocking
+  // choice — keep (adding this document to it) or clear the selection.
+  // Session restore never comes through here, so reloads stay quiet.
+  if (changed && state.project) warnStaleProject();
+}
+
+function warnStaleProject() {
+  const keep = confirm(
+    `Project "${state.project}" is still selected in stage 3.\n\n` +
+    `OK — keep it: this document's run will add to "${state.project}".\n` +
+    `Cancel — clear it, then pick or create a project in stage 3.`);
+  if (!keep) {
+    $('#kb-select').value = '';
+    selectProject('');
+  }
 }
 
 async function uploadPdf() {
