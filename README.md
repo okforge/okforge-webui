@@ -16,10 +16,13 @@ publish). OCR and ingestion are always separate steps, so the same tool
 doubles as a pure PDF→markdown converter — skip the ingest and take the
 files from `md-out/`.
 
-Inputs: PDFs, single page-scan images (jpg/png/tif/bmp — wrapped into a
-one-page PDF on upload so the OCR pipeline handles them), and your own
-markdown/text documents (added straight to a project, no OCR). Other
-formats (docx, pptx, html …) should be pre-converted to markdown first.
+Inputs: PDFs, page-scan images (jpg/png/tif/bmp — wrapped into PDF on
+upload so the OCR pipeline handles them), and your own markdown/text
+documents (added straight to a project, no OCR). Selecting several
+PDFs/images at once combines them into **one** PDF in natural file-name
+order — the upload shows the exact order and combined name before
+anything is sent. Other formats (docx, pptx, html …) should be
+pre-converted to markdown first.
 
 ## What's in the box
 

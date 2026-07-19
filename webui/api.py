@@ -12,12 +12,14 @@ import contextlib
 import json
 import re
 import shutil
+import tempfile
 import time
 from pathlib import Path
 from urllib.parse import quote
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
+from fastapi import (FastAPI, Form, HTTPException, Request, Response,
+                     UploadFile)
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                PlainTextResponse)
 from pydantic import BaseModel
@@ -134,6 +136,68 @@ async def upload_pdf(file: UploadFile):
         tmp.unlink(missing_ok=True)
     st = dest.stat()
     return {"name": dest.name, "path": str(dest), "size": st.st_size}
+
+
+@app.post("/api/inbox/combine", status_code=201)
+async def combine_upload(files: list[UploadFile], name: str = Form(...)):
+    """Combine several PDFs / page-scan images into ONE inbox PDF, in
+    the order the files were sent (the UI natural-sorts by filename and
+    shows the plan before uploading). Output is an ordinary inbox PDF —
+    the pipeline neither knows nor cares that it was combined. Nothing
+    is written until every part has merged cleanly."""
+    if len(files) < 2:
+        raise HTTPException(400, "combine needs at least two files")
+    stem = jobs._safe_stem(name.strip()) if name.strip() else ""
+    if not stem:
+        raise HTTPException(400, "a name for the combined PDF is required")
+    dest = config.INBOX_DIR / f"{stem}.pdf"
+    if dest.exists():
+        raise HTTPException(409, f"{dest.name} already exists in the inbox")
+    for f in files:
+        src = Path(f.filename or "").name
+        suffix = Path(src).suffix.lower()
+        if suffix != ".pdf" and suffix not in _IMAGE_UPLOAD_EXTS:
+            raise HTTPException(400, f"{src or '(unnamed)'}: only PDFs and "
+                                     "page-scan images (jpg / png / tif / bmp) "
+                                     "can be combined")
+    import pymupdf
+    merged = pymupdf.open()
+    parts = []
+    try:
+        with tempfile.TemporaryDirectory(prefix="okforge-combine-") as td:
+            for i, f in enumerate(files):
+                src = Path(f.filename or "").name
+                # keep the extension: pymupdf picks the parser by it
+                tmp = Path(td) / f"part{i}{Path(src).suffix.lower()}"
+                with tmp.open("wb") as out:
+                    while chunk := await f.read(1 << 20):
+                        out.write(chunk)
+                start = merged.page_count + 1
+                try:
+                    with pymupdf.open(str(tmp)) as doc:
+                        if tmp.suffix == ".pdf":
+                            merged.insert_pdf(doc)
+                        else:
+                            pdf_bytes = doc.convert_to_pdf()
+                            with pymupdf.open(stream=pdf_bytes,
+                                              filetype="pdf") as one:
+                                merged.insert_pdf(one)
+                except Exception:
+                    raise HTTPException(400,
+                                        f"{src}: not a readable PDF/image")
+                end = merged.page_count
+                parts.append({"name": src, "pages": str(start) if start == end
+                              else f"{start}-{end}"})
+            total = merged.page_count
+            merged.save(str(dest))
+    except Exception:
+        dest.unlink(missing_ok=True)
+        raise
+    finally:
+        merged.close()
+    st = dest.stat()
+    return {"name": dest.name, "path": str(dest), "size": st.st_size,
+            "page_count": total, "parts": parts}
 
 
 # ---------------------------------------------------------------- probe

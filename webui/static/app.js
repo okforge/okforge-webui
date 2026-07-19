@@ -174,6 +174,73 @@ function warnStaleProject() {
   }
 }
 
+// ---- multi-file upload → one combined PDF ------------------------------
+// One rule: pages follow natural file-name order (page2 before page10).
+// The panel shows the exact plan before upload and the page mapping after.
+
+function sortedUploadFiles() {
+  return [...$('#upload-file').files].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined,
+                         {numeric: true, sensitivity: 'base'}));
+}
+
+function defaultCombineName(files) {
+  const stems = files.map(f => f.name.replace(/\.[^.]+$/, ''));
+  let prefix = stems[0];
+  for (const s of stems.slice(1))
+    while (prefix && !s.startsWith(prefix)) prefix = prefix.slice(0, -1);
+  prefix = prefix.replace(/[\s_\-0-9]+$/, '');
+  return prefix || stems[0];
+}
+
+function updateCombinePanel() {
+  const panel = $('#combine-panel');
+  const btn = $('#upload-btn');
+  const files = sortedUploadFiles();
+  if (files.length < 2) {
+    panel.classList.add('hidden');
+    btn.textContent = 'Upload';
+    return;
+  }
+  btn.textContent = `Upload ${files.length} files as one PDF`;
+  panel.replaceChildren(
+    el('div', {},
+      el('b', {text: `These ${files.length} files will be combined into one PDF, in this order:`})),
+    el('ol', {}, ...files.map(f => el('li', {text: f.name}))),
+    el('div', {class: 'row'},
+      el('label', {text: 'Combined name '},
+        el('input', {type: 'text', id: 'combine-name', size: '24',
+                     value: defaultCombineName(files)})),
+      el('span', {class: 'muted', text: '.pdf'})),
+    el('div', {class: 'muted',
+      text: 'The order comes from the file names (page2 sorts before ' +
+            'page10). Wrong order? Rename the files and pick them again.'}));
+  panel.classList.remove('hidden');
+}
+
+async function combineUpload() {
+  const files = sortedUploadFiles();
+  const name = ($('#combine-name')?.value || '').trim();
+  if (!name) { toast('name the combined PDF first'); return; }
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f);
+  fd.append('name', name);
+  const d = await uploadWithProgress('/api/inbox/combine', fd);
+  $('#upload-file').value = '';
+  $('#upload-btn').textContent = 'Upload';
+  // Result view: what landed where. Stays up (the probe box appears
+  // below it) until the selection changes or a rescan resets stage 1.
+  $('#combine-panel').replaceChildren(
+    el('div', {},
+      el('b', {text: `combined into ${d.name} (${d.page_count} pages)`})),
+    ...d.parts.map(p => el('div', {class: 'muted',
+      text: `${p.name} → page${p.pages.includes('-') ? 's' : ''} ${p.pages}`})));
+  toast(`combined ${d.parts.length} files into ${d.name} (${d.page_count} pages)`, 'info');
+  await loadInbox(d.path);
+  pdfSelectionChanged(d.path);
+  await runProbe();
+}
+
 async function uploadPdf() {
   const f = $('#upload-file').files[0];
   if (!f) { toast('choose a .pdf file first'); return; }
@@ -1469,6 +1536,7 @@ function init() {
     try {
       await loadInbox();
       $('#inbox-select').value = '';
+      $('#combine-panel').classList.add('hidden');
       pdfSelectionChanged(null);
       const d = await api('/api/jobs?limit=1');
       state.clearedBelowId = d.jobs.length ? d.jobs[0].id : 0;
@@ -1478,10 +1546,14 @@ function init() {
   };
   // Auto-probe: picking a PDF probes it right away (fast local scan).
   $('#inbox-select').onchange = e => {
+    $('#combine-panel').classList.add('hidden');
     pdfSelectionChanged(e.target.value);
     if (e.target.value) runProbe().catch(err => toast(err.message));
   };
-  $('#upload-file').onchange = updateUploadControls;
+  $('#upload-file').onchange = () => {
+    updateUploadControls();
+    updateCombinePanel();
+  };
   // Discovering in the pilot that you need --figures should carry into the
   // run; unticking the run box must NOT reach back into the pilot.
   $('#pilot-figures').onchange = e => {
@@ -1491,7 +1563,9 @@ function init() {
   $('#pilot-prompt-extra').onchange = e => {
     if (e.target.value.trim()) $('#run-prompt-extra').value = e.target.value.trim();
   };
-  $('#upload-btn').onclick = () => uploadPdf().catch(e => toast(e.message));
+  $('#upload-btn').onclick = () =>
+    ($('#upload-file').files.length > 1 ? combineUpload() : uploadPdf())
+      .catch(e => toast(e.message));
   $('#pilot-btn').onclick = () => runPilot().catch(e => toast(e.message));
   $('#kb-select').onchange = e => selectProject(e.target.value);
   $('#kb-create-btn').onclick = () => createProject().catch(e => toast(e.message));

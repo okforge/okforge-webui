@@ -163,10 +163,17 @@ llm_extra_body:
 - **Bring-your-own markdown**: "Add markdown…" (stage 5, Markdown row)
   uploads `.md`/`.txt` files straight into `md-out/<project>/` — no OCR
   — where the same ingest button treats them like any OCR'd chunk
-  (`.txt` is saved as `.md`; duplicate names are refused). Single
-  page-scan images (jpg/png/tif/bmp) go the other way: the stage-1
-  upload wraps them into a one-page PDF so the normal OCR pipeline
-  applies.
+  (`.txt` is saved as `.md`; duplicate names are refused). Page-scan
+  images (jpg/png/tif/bmp) go the other way: the stage-1 upload wraps
+  them into a PDF so the normal OCR pipeline applies.
+- **Combining page-per-file scans**: selecting several PDFs/images in
+  the stage-1 upload merges them into one inbox PDF in natural
+  file-name order (`page2` before `page10`); the panel shows the exact
+  order and name before uploading, and the per-file page mapping
+  after. When file names don't reflect the true order, reorder before
+  uploading instead — [PDF Arranger](https://github.com/pdfarranger/pdfarranger)
+  (GUI drag-to-reorder) or `img2pdf` + `pdfunite` (CLI) — and upload
+  the result as one PDF.
 - While an ingest runs, the stage-5 **KB stats update as each chunk
   lands** and **Publish is held** ("ingest in progress") until the last
   chunk is in.

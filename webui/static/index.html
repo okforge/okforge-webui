@@ -31,14 +31,15 @@
     <button id="inbox-refresh" class="small"
       title="Reset: re-scan the inbox, clear the selection and probe info, and clear finished jobs from the queue (tick 'show all KBs' to see them again)">&#8635;</button>
     <span class="or">or</span>
-    <input type="file" id="upload-file"
+    <input type="file" id="upload-file" multiple
       accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.bmp"
-      title="A PDF, or a single page-scan image (jpg/png/tif/bmp) — images are wrapped into a one-page PDF on upload">
+      title="PDFs or page-scan images (jpg/png/tif/bmp). Pick several and they are combined into ONE PDF in file-name order — the plan shows below before anything uploads">
     <button id="upload-btn">Upload</button>
     <progress id="upload-progress" class="hidden" max="100" value="0"></progress>
     <button id="pdf-delete-btn" class="small danger"
       title="Move the selected PDF out of the inbox into trash/ — recoverable by moving it back">Delete PDF&hellip;</button>
   </div>
+  <div id="combine-panel" class="result hidden"></div>
   <div id="probe-result" class="result hidden"></div>
 </section>
 
