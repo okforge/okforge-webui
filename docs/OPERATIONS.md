@@ -336,7 +336,7 @@ Obsidian: no app to install, just a URL.
 
   The publish job invokes `node` directly (npx isn't reliably on a
   service's PATH): it uses `node` from PATH, falling back to
-  `/usr/bin/node`, or set `OPENKB_WEBUI_NODE` explicitly.
+  `/usr/bin/node`, or set `OKFORGE_WEBUI_NODE` explicitly.
 
 - **Publish site** button (verify stage) builds the wiki into
   `<sites-dir>/<Subject>/` via a `publish` job; the

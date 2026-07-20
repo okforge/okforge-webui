@@ -22,11 +22,11 @@ ExecStart=/opt/okforge/okforge-webui/.venv/bin/python -m webui
 Restart=on-failure
 RestartSec=5
 # Bind + backend config (see webui/config.py for the full list), e.g.:
-# Environment=OPENKB_WEBUI_HOST=0.0.0.0
-# Environment=OPENKB_WEBUI_PORT=8500
-# Environment=OPENKB_WEBUI_ENDPOINTS=gpu1=http://gpu1:8080/v1
-# Environment=OPENKB_WEBUI_MD_OUT=/opt/okforge/md-out
-# Environment=OPENKB_WEBUI_TRASH=/opt/okforge/trash
+# Environment=OKFORGE_WEBUI_HOST=0.0.0.0
+# Environment=OKFORGE_WEBUI_PORT=8500
+# Environment=OKFORGE_WEBUI_ENDPOINTS=gpu1=http://gpu1:8080/v1
+# Environment=OKFORGE_WEBUI_MD_OUT=/opt/okforge/md-out
+# Environment=OKFORGE_WEBUI_TRASH=/opt/okforge/trash
 
 [Install]
 WantedBy=multi-user.target

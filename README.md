@@ -78,7 +78,7 @@ pre-converted to markdown first.
 - **Node.js 18+** — only for the optional static-site publishing
   (Quartz); everything else runs without it. Quartz is a one-time
   install, separate from this repo: in the shared quartz dir
-  (`<base>/quartz`, or `OPENKB_WEBUI_QUARTZ_DIR`) run **`npx quartz
+  (`<base>/quartz`, or `OKFORGE_WEBUI_QUARTZ_DIR`) run **`npx quartz
   create`** once to scaffold it. Skipping this is the usual first-publish
   failure — the build aborts with `Could not resolve
   "../../.quartz/plugins"` because that step is what generates
@@ -158,7 +158,7 @@ cd <base>/okforge-webui
 # browse http://<host>:8500/
 ```
 
-`OPENKB_WEBUI_HOST` / `OPENKB_WEBUI_PORT` change the bind (default
+`OKFORGE_WEBUI_HOST` / `OKFORGE_WEBUI_PORT` change the bind (default
 `0.0.0.0:8500` — LAN-visible; use `127.0.0.1` to keep it local). Same
 trust model in every mode: LAN-only, no auth — don't expose it beyond a
 network you trust.
@@ -180,7 +180,7 @@ installs Apache (static docroot + `/api/` reverse proxy) in front of the
 same backend under systemd:
 
 ```bash
-SERVER_NAME=okforge.local OPENKB_WEBUI_ENDPOINTS="gpu1=http://gpu1:8080/v1" \
+SERVER_NAME=okforge.local OKFORGE_WEBUI_ENDPOINTS="gpu1=http://gpu1:8080/v1" \
     webui/deploy.sh
 ```
 
@@ -244,35 +244,40 @@ call — a 20-page chunk should ingest in a couple of minutes on a local
 
 Everything is an environment variable (for the systemd deployments, set
 them in the unit — `deploy.sh` passes any that are exported when it
-runs). `<base>` below means the directory this repo sits in:
+runs). `<base>` below means the directory this repo sits in.
+
+> **Note:** these use the `OKFORGE_WEBUI_*` prefix. The pre-rebrand
+> `OPENKB_WEBUI_*` names (and `OPENKB_DIR` for the engine dir) still work
+> — the backend reads the new name first and falls back to the old one,
+> printing a one-time deprecation line on stderr naming what to rename.
 
 | variable | default | meaning |
 |---|---|---|
-| `OPENKB_WEBUI_HOST` | `0.0.0.0` | bind address (`python -m webui`) |
-| `OPENKB_WEBUI_PORT` | `8500` | bind port (`python -m webui`) |
-| `OPENKB_WEBUI_ENDPOINTS` | `local=http://localhost:8080/v1` | LLM endpoints for the UI dropdown, comma-separated `label=url[\|key[\|model]]` — key and model only for hosted services (see below) |
-| `OPENKB_WEBUI_DEFAULT_ENDPOINT` | first label | pre-selected endpoint |
-| `OPENKB_WEBUI_MODEL` | `openai/Qwen3.6-27B-MTP` | model string new KBs are initialized with (per-endpoint `model` overrides it) |
-| `OPENKB_WEBUI_KB_ROOT` | `<base>/kbs` | where KBs live |
-| `OPENKB_WEBUI_INBOX` | `<base>/inbox` | PDF drop dir |
-| `OPENKB_WEBUI_MD_OUT` | `<base>/md-out` | per-project OCR'd markdown |
-| `OPENKB_WEBUI_RETIRED_DIR` | `<base>/kbs-retired` | where retired KBs move |
-| `OPENKB_WEBUI_TRASH` | `<base>/trash` | where web-UI deletes move things |
-| `OPENKB_WEBUI_QUARTZ_DIR` | `<base>/quartz` | shared Quartz install |
-| `OPENKB_WEBUI_SITES_DIR` | `<base>/sites` | published-site output |
-| `OPENKB_WEBUI_PUBLIC_SITE_HOST` | `localhost` | public host for published sites' baseUrl |
-| `OPENKB_WEBUI_PUBLIC_SITE_DEST` | `user@host:/var/www/sites` | rsync target shown by the go-public helper |
-| `OPENKB_WEBUI_NODE` | `node` on PATH, else `/usr/bin/node` | node binary for Quartz builds |
-| `OPENKB_WEBUI_OPENKB_DIR` | this repo | dir whose `.venv` holds the engine + `okforge-vision-ocr` console scripts — set this only if that `.venv` lives somewhere other than this repo (shared or parent-dir venv) |
+| `OKFORGE_WEBUI_HOST` | `0.0.0.0` | bind address (`python -m webui`) |
+| `OKFORGE_WEBUI_PORT` | `8500` | bind port (`python -m webui`) |
+| `OKFORGE_WEBUI_ENDPOINTS` | `local=http://localhost:8080/v1` | LLM endpoints for the UI dropdown, comma-separated `label=url[\|key[\|model]]` — key and model only for hosted services (see below) |
+| `OKFORGE_WEBUI_DEFAULT_ENDPOINT` | first label | pre-selected endpoint |
+| `OKFORGE_WEBUI_MODEL` | `openai/Qwen3.6-27B-MTP` | model string new KBs are initialized with (per-endpoint `model` overrides it) |
+| `OKFORGE_WEBUI_KB_ROOT` | `<base>/kbs` | where KBs live |
+| `OKFORGE_WEBUI_INBOX` | `<base>/inbox` | PDF drop dir |
+| `OKFORGE_WEBUI_MD_OUT` | `<base>/md-out` | per-project OCR'd markdown |
+| `OKFORGE_WEBUI_RETIRED_DIR` | `<base>/kbs-retired` | where retired KBs move |
+| `OKFORGE_WEBUI_TRASH` | `<base>/trash` | where web-UI deletes move things |
+| `OKFORGE_WEBUI_QUARTZ_DIR` | `<base>/quartz` | shared Quartz install |
+| `OKFORGE_WEBUI_SITES_DIR` | `<base>/sites` | published-site output |
+| `OKFORGE_WEBUI_PUBLIC_SITE_HOST` | `localhost` | public host for published sites' baseUrl |
+| `OKFORGE_WEBUI_PUBLIC_SITE_DEST` | `user@host:/var/www/sites` | rsync target shown by the go-public helper |
+| `OKFORGE_WEBUI_NODE` | `node` on PATH, else `/usr/bin/node` | node binary for Quartz builds |
+| `OKFORGE_WEBUI_ENGINE_DIR` | this repo | dir whose `.venv` holds the engine + `okforge-vision-ocr` console scripts — set this only if that `.venv` lives somewhere other than this repo (shared or parent-dir venv) |
 
-The documented install puts `.venv` inside the repo, which is why `OPENKB_WEBUI_OPENKB_DIR` needs no setting by default. If you instead share one `.venv` across checkouts or keep it in the base dir, point this var at the directory that contains it — otherwise the UI looks for `openkb`/`okforge-vision-ocr` under `<repo>/.venv/bin` and reports them missing.
+The documented install puts `.venv` inside the repo, which is why `OKFORGE_WEBUI_ENGINE_DIR` needs no setting by default. If you instead share one `.venv` across checkouts or keep it in the base dir, point this var at the directory that contains it — otherwise the UI looks for `openkb`/`okforge-vision-ocr` under `<repo>/.venv/bin` and reports them missing.
 
 Local llama.cpp/vLLM endpoints need only `label=url`. A hosted
 OpenAI-compatible service takes two more `|`-separated fields — its API
 key and the model in LiteLLM `provider/model` format:
 
 ```
-OPENKB_WEBUI_ENDPOINTS="gpu1=http://gpu1:8080/v1,openrouter=https://openrouter.ai/api/v1|sk-or-v1-...|openrouter/qwen/qwen3.6-27b"
+OKFORGE_WEBUI_ENDPOINTS="gpu1=http://gpu1:8080/v1,openrouter=https://openrouter.ai/api/v1|sk-or-v1-...|openrouter/qwen/qwen3.6-27b"
 ```
 
 KBs created on such an endpoint get the key in their `.env`, the model

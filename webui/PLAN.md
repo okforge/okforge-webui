@@ -52,7 +52,7 @@ Browser ── Apache :80 ──┬── /            static HTML/CSS/JS  (webu
    Nothing proceeds until the pilot looks right.
 3. **Set up KB** — name the KB dir, backend runs `openkb init -l en`
    non-interactively and writes `.env` (endpoint dropdown from the
-   configured `OPENKB_WEBUI_ENDPOINTS`). Existing KBs listed for adding
+   configured `OKFORGE_WEBUI_ENDPOINTS`). Existing KBs listed for adding
    more docs.
 4. **Run** — chunk plan (default 20 pages, editable), then queued jobs
    per chunk: OCR → (translate) → add. Live progress via SSE tail of the

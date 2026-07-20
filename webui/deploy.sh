@@ -5,19 +5,25 @@
 #
 # All overrides are env vars — per-host examples:
 #   SERVER_NAME=kb.example.lan ./deploy.sh
-#   OPENKB_WEBUI_ENDPOINTS="gpu1=http://gpu1:8080/v1,gpu2=http://gpu2:8081/v1" ./deploy.sh
-# (APP_NAME renames the systemd unit, vhost conf, and docroot; the
-# OPENKB_WEBUI_* env var names are code-level and stay, like .openkb/.)
+#   OKFORGE_WEBUI_ENDPOINTS="gpu1=http://gpu1:8080/v1,gpu2=http://gpu2:8081/v1" ./deploy.sh
+# (APP_NAME renames the systemd unit, vhost conf, and docroot.) The
+# backend env vars use the OKFORGE_WEBUI_* prefix; the pre-rebrand
+# OPENKB_WEBUI_* names (and OPENKB_DIR for the engine dir) are still
+# accepted here and written into the unit under the new names.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_NAME=${APP_NAME:-okforge-webui}
 DOCROOT=${DOCROOT:-/var/www/$APP_NAME}
 SERVER_NAME=${SERVER_NAME:-okforge.local}
-OPENKB_DIR=${OPENKB_DIR:-/opt/okforge/tooling}
+# Engine dir (holds .venv with the okforge engine + OCR scripts). New name
+# OKFORGE_ENGINE_DIR; legacy OPENKB_DIR still honored.
+ENGINE_DIR=${OKFORGE_ENGINE_DIR:-${OPENKB_DIR:-/opt/okforge/tooling}}
 RUN_USER=${RUN_USER:-${SUDO_USER:-$USER}}
-OPENKB_WEBUI_KB_ROOT=${OPENKB_WEBUI_KB_ROOT:-/opt/okforge/kbs}
-OPENKB_WEBUI_INBOX=${OPENKB_WEBUI_INBOX:-/opt/okforge/inbox}
+# KB_ROOT/INBOX always get written to the unit (explicit defaults); new
+# OKFORGE_WEBUI_* name first, legacy OPENKB_WEBUI_* second.
+OKFORGE_WEBUI_KB_ROOT=${OKFORGE_WEBUI_KB_ROOT:-${OPENKB_WEBUI_KB_ROOT:-/opt/okforge/kbs}}
+OKFORGE_WEBUI_INBOX=${OKFORGE_WEBUI_INBOX:-${OPENKB_WEBUI_INBOX:-/opt/okforge/inbox}}
 # Space-separated browser origins allowed to call /mcp cross-origin
 # (browser-based MCP clients). Empty = CORS off.
 MCP_CORS_ORIGINS=${MCP_CORS_ORIGINS:-}
@@ -47,24 +53,26 @@ sudo a2ensite -q "$APP_NAME"
 sudo apachectl configtest
 sudo systemctl reload apache2
 
-echo "== systemd unit ($APP_NAME.service, user=$RUN_USER, dir=$OPENKB_DIR)"
+echo "== systemd unit ($APP_NAME.service, user=$RUN_USER, dir=$ENGINE_DIR)"
 TMP_UNIT=$(mktemp)
-sed -e "s|/opt/okforge/tooling|$OPENKB_DIR|g" \
+sed -e "s|/opt/okforge/tooling|$ENGINE_DIR|g" \
     -e "s/^User=.*/User=$RUN_USER/" \
     -e "s/^Group=.*/Group=$RUN_USER/" \
     -e "s/okforge-webui/$APP_NAME/g" \
     deploy/okforge-webui.service > "$TMP_UNIT"
-# Backend config overrides ride the unit as Environment= lines.
-# OPENKB_WEBUI_OPENKB_DIR always: the config default derives from the
-# service user's $HOME, which is wrong for a /opt install.
-sed -i "/^\[Service\]/a Environment=OPENKB_WEBUI_OPENKB_DIR=$OPENKB_DIR" "$TMP_UNIT"
-for var in OPENKB_WEBUI_KB_ROOT OPENKB_WEBUI_INBOX OPENKB_WEBUI_MODEL \
-           OPENKB_WEBUI_ENDPOINTS OPENKB_WEBUI_DEFAULT_ENDPOINT \
-           OPENKB_WEBUI_PUBLIC_SITE_HOST OPENKB_WEBUI_PUBLIC_SITE_DEST \
-           OPENKB_WEBUI_QUARTZ_DIR OPENKB_WEBUI_SITES_DIR OPENKB_WEBUI_NODE; do
-    val=${!var:-}
+# Backend config overrides ride the unit as Environment= lines, always
+# under the new OKFORGE_WEBUI_* names. The engine dir is always written:
+# the config default derives from the service user's $HOME, which is
+# wrong for a /opt install.
+sed -i "/^\[Service\]/a Environment=OKFORGE_WEBUI_ENGINE_DIR=$ENGINE_DIR" "$TMP_UNIT"
+# For each passthrough var, take the new OKFORGE_WEBUI_* export if set,
+# else the legacy OPENKB_WEBUI_* one, and write it under the new name.
+for suffix in KB_ROOT INBOX MODEL ENDPOINTS DEFAULT_ENDPOINT \
+              PUBLIC_SITE_HOST PUBLIC_SITE_DEST QUARTZ_DIR SITES_DIR NODE; do
+    new="OKFORGE_WEBUI_$suffix"; old="OPENKB_WEBUI_$suffix"
+    val=${!new:-${!old:-}}
     if [ -n "$val" ]; then
-        sed -i "/^\[Service\]/a Environment=$var=$val" "$TMP_UNIT"
+        sed -i "/^\[Service\]/a Environment=$new=$val" "$TMP_UNIT"
     fi
 done
 sudo install -m 644 "$TMP_UNIT" "/etc/systemd/system/$APP_NAME.service"

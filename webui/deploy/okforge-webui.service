@@ -20,9 +20,9 @@ ExecStart=/opt/okforge/tooling/.venv/bin/uvicorn webui.api:app --host 127.0.0.1 
 Restart=on-failure
 RestartSec=5
 # Config overrides (see webui/config.py) go here if ever needed, e.g.:
-# Environment=OPENKB_WEBUI_INBOX=/opt/okforge/inbox
-# Environment=OPENKB_WEBUI_MD_OUT=/opt/okforge/md-out
-# Environment=OPENKB_WEBUI_TRASH=/opt/okforge/trash
+# Environment=OKFORGE_WEBUI_INBOX=/opt/okforge/inbox
+# Environment=OKFORGE_WEBUI_MD_OUT=/opt/okforge/md-out
+# Environment=OKFORGE_WEBUI_TRASH=/opt/okforge/trash
 
 [Install]
 WantedBy=multi-user.target
