@@ -13,9 +13,19 @@ import os
 import shutil
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 # This repo's checkout (webui/'s parent) and the base dir beside it.
 REPO_DIR = Path(__file__).resolve().parent.parent
 _BASE = REPO_DIR.parent
+
+# Load a repo-root .env before reading any OPENKB_WEBUI_* var below, so a
+# plain `python -m webui` (no systemd unit) still picks up configuration.
+# Done here rather than in __main__.py so every entrypoint benefits — the
+# API app and the MCP server both import this module. load_dotenv does NOT
+# override variables already set in the environment (systemd/exports win),
+# and silently no-ops when the file is absent.
+load_dotenv(REPO_DIR / ".env")
 
 # Where the PDF dropdown looks (plus uploads land here).
 INBOX_DIR = Path(os.environ.get("OPENKB_WEBUI_INBOX", _BASE / "inbox"))

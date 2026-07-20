@@ -76,7 +76,16 @@ pre-converted to markdown first.
 - **Git** — for the clone; on Windows it also provides the `grep`
   binary the engine's query agent uses.
 - **Node.js 18+** — only for the optional static-site publishing
-  (Quartz); everything else runs without it.
+  (Quartz); everything else runs without it. Quartz is a one-time
+  install, separate from this repo: in the shared quartz dir
+  (`<base>/quartz`, or `OPENKB_WEBUI_QUARTZ_DIR`) run **`npx quartz
+  create`** once to scaffold it. Skipping this is the usual first-publish
+  failure — the build aborts with `Could not resolve
+  "../../.quartz/plugins"` because that step is what generates
+  `.quartz/plugins/`. On a **LAN-only / offline** box, also disable the
+  default **og-image** emitter in `quartz.config.ts` (it fetches a font
+  over the network at build time and otherwise fails); nothing else in
+  Quartz needs outbound access.
 
 ## Directory layout
 
@@ -254,6 +263,9 @@ runs). `<base>` below means the directory this repo sits in:
 | `OPENKB_WEBUI_PUBLIC_SITE_HOST` | `localhost` | public host for published sites' baseUrl |
 | `OPENKB_WEBUI_PUBLIC_SITE_DEST` | `user@host:/var/www/sites` | rsync target shown by the go-public helper |
 | `OPENKB_WEBUI_NODE` | `node` on PATH, else `/usr/bin/node` | node binary for Quartz builds |
+| `OPENKB_WEBUI_OPENKB_DIR` | this repo | dir whose `.venv` holds the engine + `okforge-vision-ocr` console scripts — set this only if that `.venv` lives somewhere other than this repo (shared or parent-dir venv) |
+
+The documented install puts `.venv` inside the repo, which is why `OPENKB_WEBUI_OPENKB_DIR` needs no setting by default. If you instead share one `.venv` across checkouts or keep it in the base dir, point this var at the directory that contains it — otherwise the UI looks for `openkb`/`okforge-vision-ocr` under `<repo>/.venv/bin` and reports them missing.
 
 Local llama.cpp/vLLM endpoints need only `label=url`. A hosted
 OpenAI-compatible service takes two more `|`-separated fields — its API
@@ -303,7 +315,18 @@ llm_extra_body:
     enable_thinking: false
 ```
 
-KBs created through the web UI get this automatically.
+KBs created through the web UI get this automatically. **Pilot and OCR
+runs are the exception** — they happen before a KB exists, calling the
+vision model directly. That path already sends `enable_thinking: false`
+(and `reasoning.enabled: false`) and strips any stray `<think>` block
+from the transcript, so nothing is normally needed. But if your model's
+own chat template *overrides* that request-level flag — the
+Qwen3.6-27B-MTP template is one that keeps thinking on regardless — the
+model still generates (and you still pay for) the reasoning block even
+though the text is discarded. That can only be fixed at the server: use
+a llama.cpp/vLLM preset (or a `--jinja` chat template) that honors
+`enable_thinking: false`. Symptom: pilot/OCR pages take far longer than
+their token count suggests.
 
 One more expectation worth setting for large collections: ingest cost
 scales with the size of the *wiki*, not the document being added —

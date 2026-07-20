@@ -1,3 +1,7 @@
 .venv/
 __pycache__/
 *.pyc
+
+# Local webui configuration (may hold endpoint URLs / API keys) — see
+# config.py's load_dotenv and the Configuration section of the README.
+.env
