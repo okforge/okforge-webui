@@ -159,6 +159,17 @@ llm_extra_body:
     enable_thinking: false
 ```
 
+- **Pilot/OCR thinking tax** (this runs *before* any KB exists, so the
+  block above can't cover it): pilot and OCR jobs call the vision model
+  directly and already send `enable_thinking: false` (and
+  `reasoning.enabled: false`), stripping any stray `<think>` block from
+  the transcript. But a model whose chat template *overrides* that
+  request flag — Qwen3.6-27B-MTP's template keeps thinking on regardless
+  — still generates (and bills) the reasoning block, only for the text
+  to be discarded. Fix it at the server: a llama.cpp/vLLM preset (or
+  `--jinja` chat template) that honors `enable_thinking: false`. Symptom:
+  pilot/OCR pages far slower than their token count implies.
+
 - Project description (the MCP `list_projects` 'about' line): the webui
   **auto-writes one after every ingest** — a `describe` job runs one LLM
   call over the index.md document list and refreshes the line as the KB
@@ -337,6 +348,12 @@ Obsidian: no app to install, just a URL.
   The publish job invokes `node` directly (npx isn't reliably on a
   service's PATH): it uses `node` from PATH, falling back to
   `/usr/bin/node`, or set `OKFORGE_WEBUI_NODE` explicitly.
+
+  **Offline / LAN-only boxes:** Quartz's default `quartz.config.ts`
+  enables an og-image emitter that fetches a font over the network at
+  build time — with no outbound access the publish job fails there.
+  Remove the og-image emitter from `quartz.config.ts` (nothing else in
+  Quartz needs the network for a build).
 
 - **Publish site** button (verify stage) builds the wiki into
   `<sites-dir>/<Subject>/` via a `publish` job; the

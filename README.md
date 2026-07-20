@@ -76,16 +76,17 @@ pre-converted to markdown first.
 - **Git** — for the clone; on Windows it also provides the `grep`
   binary the engine's query agent uses.
 - **Node.js 18+** — only for the optional static-site publishing
-  (Quartz); everything else runs without it. Quartz is a one-time
-  install, separate from this repo: in the shared quartz dir
-  (`<base>/quartz`, or `OKFORGE_WEBUI_QUARTZ_DIR`) run **`npx quartz
-  create`** once to scaffold it. Skipping this is the usual first-publish
-  failure — the build aborts with `Could not resolve
-  "../../.quartz/plugins"` because that step is what generates
-  `.quartz/plugins/`. On a **LAN-only / offline** box, also disable the
-  default **og-image** emitter in `quartz.config.ts` (it fetches a font
-  over the network at build time and otherwise fails); nothing else in
-  Quartz needs outbound access.
+  (Quartz); everything else runs without it. Quartz is a one-time,
+  once-per-machine install into the shared quartz dir (`<base>/quartz`,
+  or `OKFORGE_WEBUI_QUARTZ_DIR`) — clone it, check out v5, `npm ci`, then
+  **`npx quartz plugin install`**; the exact steps are in
+  [OPERATIONS](docs/OPERATIONS.md#publishing-a-kb-as-a-website-quartz).
+  Skipping the `plugin install` step is the usual first-publish failure:
+  the build aborts with `Could not resolve "../../.quartz/plugins"`,
+  which is exactly the dir that step generates. On a **LAN-only /
+  offline** box, also disable the default **og-image** emitter in
+  `quartz.config.ts` (it fetches a font over the network at build time
+  and otherwise fails); nothing else in Quartz needs outbound access.
 
 ## Directory layout
 
