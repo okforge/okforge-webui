@@ -355,6 +355,10 @@ for the measured figures before planning a multi-day run.
   anatomy, copying between machines, re-ingest semantics (what happens
   when you add the same document twice), Obsidian editing safety, Quartz
   publishing, troubleshooting.
+- [`docs/MCP_CLIENT_PROMPT.md`](docs/MCP_CLIENT_PROMPT.md) — the system
+  prompt to paste into MCP clients that don't surface the server's own
+  `instructions` (Open WebUI and most OpenAPI-bridged clients); also
+  served from the server as the MCP prompt `kb-search-guide`.
 - [`webui/PLAN.md`](webui/PLAN.md) — architecture and API design notes.
 
 ## License
