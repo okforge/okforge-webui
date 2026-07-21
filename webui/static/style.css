@@ -35,6 +35,15 @@ header .logo { height: 28px; align-self: center; margin-right: -.4rem; }
 header h1 { font-size: 1.15rem; margin: 0; }
 .hdr-right { margin-left: auto; display: flex; align-items: center; gap: .5rem; }
 .hdr-label { font-size: .85rem; color: var(--muted); }
+.warn-badge {
+  font-size: .72rem;
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: 4px;
+  padding: .05rem .4rem;
+  white-space: nowrap;
+  cursor: help;
+}
 
 .light { font-size: 1.1rem; color: var(--muted); }
 .light.idle { color: var(--ok); }
@@ -43,12 +52,35 @@ header h1 { font-size: 1.15rem; margin: 0; }
 
 main { max-width: 62rem; margin: 1rem auto 4rem; padding: 0 1rem; }
 
+/* Workflow orientation panel — compact, above stage 1. */
+#orient {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: .6rem 1.1rem;
+  margin-bottom: 1rem;
+  font-size: .9rem;
+}
+#orient p { margin: .3rem 0; }
+.orient-links a {
+  display: inline-block;
+  margin-right: .6rem;
+  padding: .1rem .55rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  text-decoration: none;
+  color: var(--accent);
+}
+.orient-links a:hover { border-color: var(--accent); }
+.stagesub { font-size: .85rem; margin: -.5rem 0 .7rem; }
+
 .stage {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: .9rem 1.1rem;
   margin-bottom: 1rem;
+  scroll-margin-top: 3.4rem;  /* orientation-link jumps clear the sticky header */
 }
 /* Disabled stages ghost their contents but the gate hint (the line saying
    WHY the stage is off) stays full-opacity and readable. */

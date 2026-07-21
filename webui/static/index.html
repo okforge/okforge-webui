@@ -14,6 +14,8 @@
   <img src="logo.png" alt="" class="logo">
   <h1>okforge WebUI</h1>
   <div class="hdr-right">
+    <span class="warn-badge"
+      title="This reference web UI has no authentication or multi-user access control. Run it on a trusted network only — don't expose it to the internet.">local use — no auth</span>
     <label class="hdr-label">LLM server
       <select id="endpoint"></select>
     </label>
@@ -24,9 +26,26 @@
 
 <main>
 
+<!-- ================================================== orientation -->
+<div id="orient">
+  <p><strong>Choose the workflow you need.</strong>
+  Convert a PDF into Markdown, add Markdown you already have to a
+  knowledge base, or manage and publish an existing one. The numbered
+  stages below can be used independently — you don't need to complete
+  every stage, and a knowledge base is only created if you choose to
+  ingest.</p>
+  <p class="orient-links">
+    <a href="#stage-probe">Process a PDF</a>
+    <a href="#stage-verify">Add Markdown</a>
+    <a href="#stage-kb">Open a knowledge base</a>
+  </p>
+</div>
+
 <!-- ================================================== 1 · Probe -->
 <section class="stage" id="stage-probe">
   <h2><span class="stageno">1</span> Probe — what kind of document is this?</h2>
+  <p class="stagesub muted">Start here for PDFs and page scans. Adding
+  existing Markdown instead? Skip to stage 3.</p>
   <div class="row">
     <label>PDF
       <select id="inbox-select"></select>
@@ -49,6 +68,8 @@
 <!-- ================================================== 2 · Pilot -->
 <section class="stage" id="stage-pilot">
   <h2><span class="stageno">2</span> Pilot — OCR a few pages, check them</h2>
+  <p class="stagesub muted">Optional, but recommended before OCR'ing a
+  whole scanned PDF — a bad page costs seconds here, hours in stage 4.</p>
   <p class="gate-hint hidden" id="pilot-gate-hint"></p>
   <div class="row">
     <label>Pages <input type="text" id="pilot-pages" placeholder="e.g. 16 or 5-7" size="8"></label>
@@ -83,15 +104,20 @@
       title="Language the knowledge base is initialised with when the project's markdown is first ingested"></label>
     <button id="kb-create-btn">Create</button>
   </div>
-  <p class="muted">A project collects OCR'd markdown in md-out/&lt;name&gt;/;
-  ingesting that markdown into the project's knowledge base is a separate
-  step (stage 5, or the auto-ingest toggle in stage 4).</p>
+  <p class="muted">A project just names the folder your markdown lands in
+  (md-out/&lt;name&gt;/) — it is required before any run, but it is
+  <em>not</em> a knowledge base. The knowledge base is only created if you
+  ingest that markdown, as a separate step (stage 5, or the auto-ingest
+  toggle in stage 4).</p>
   <div id="kb-info" class="result hidden"></div>
 </section>
 
 <!-- ================================================== 4 · Run -->
 <section class="stage" id="stage-run">
   <h2><span class="stageno">4</span> Run — OCR &#8594; (translate) &#8594; markdown</h2>
+  <p class="stagesub muted">Generates markdown into the project's folder.
+  Ingesting it into a knowledge base is optional — the toggle below, or
+  later from stage 5.</p>
   <p class="gate-hint hidden" id="run-gate-hint"></p>
   <div class="row">
     <label class="check"><input type="checkbox" id="run-textlayer"
@@ -107,7 +133,7 @@
     <label>Pages per chunk <input type="number" id="chunk-pages" value="20" min="1" max="200" size="4"></label>
     <span id="chunk-plan" class="muted"></span>
     <label class="check"><input type="checkbox" id="run-auto-ingest"
-      title="When the OCR chunks finish, automatically ingest the project's markdown into its knowledge base (created on first ingest). Leave off to review the markdown first and ingest from stage 5."> ingest into KB when OCR finishes</label>
+      title="When the OCR chunks finish, automatically ingest the project's markdown into its knowledge base (created on first ingest). Leave off to review the markdown first and ingest from stage 5."> auto-add markdown to the knowledge base when OCR finishes — leave off for markdown only</label>
     <button id="run-btn" class="primary">Start run</button>
   </div>
   <details class="advanced"><summary>Fix a badly-OCR'd page (advanced)</summary>
@@ -143,7 +169,11 @@
 <!-- ================================================== 5 · Verify & use -->
 <section class="stage" id="stage-verify">
   <h2><span class="stageno">5</span> Verify &amp; use</h2>
-  <div id="verify-empty" class="muted">Pick a project in stage 3 first.</div>
+  <p class="stagesub muted">Review markdown, ingest it into the knowledge
+  base, then search, ask, and publish. Your own Markdown files can be
+  added here directly — no PDF or OCR required.</p>
+  <div id="verify-empty" class="muted">Pick or create a project in stage 3
+  first — then review, add, and ingest its markdown here.</div>
   <div id="verify-md" class="hidden">
     <h3>Markdown</h3>
     <div class="row">
@@ -152,7 +182,7 @@
       <input type="file" id="md-add-file" class="hidden" multiple
         accept=".md,.markdown,.txt">
       <button id="md-add-btn" class="small"
-        title="Add your own markdown or plain-text documents to this project — no OCR involved. They land in the project's markdown folder and are ingested by the same button as OCR'd chunks.">Add markdown&hellip;</button>
+        title="Add your own Markdown or plain-text documents to this project — no PDF or OCR involved. They land in the project's markdown folder and are ingested by the same button as OCR'd chunks.">Add Markdown files&hellip;</button>
       <button id="md-ingest-btn" class="small"
         title="Ingest every markdown chunk that isn't in the knowledge base yet — the KB is created on first ingest; already-ingested chunks are skipped">Ingest md &#8594; knowledge base</button>
       <button id="md-delete-btn" class="small danger"
