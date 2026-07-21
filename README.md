@@ -348,6 +348,9 @@ for the measured figures before planning a multi-day run.
 
 - **First run**: the [small-test walkthrough](#first-run--start-with-a-small-test)
   above is the intended on-ramp.
+- [`docs/INSTALL_PROMPT.md`](docs/INSTALL_PROMPT.md) — a prompt to hand a
+  coding agent so it walks you through install and configuration
+  interactively, Quartz included.
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — operating KBs day to day:
   anatomy, copying between machines, re-ingest semantics (what happens
   when you add the same document twice), Obsidian editing safety, Quartz
