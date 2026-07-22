@@ -1050,6 +1050,10 @@ async function refreshJobs() {
     if (!ingestActive) {
       toast('Ingest finished — ask your KB in stage 5', 'info');
       flashVerifyStage();
+      // The KB may have just been created by this ingest — without a
+      // reload, stage 3/5 keep claiming "md only / no knowledge base
+      // yet" until the user refreshes (seen live 2026-07-22).
+      loadKbs(state.project).catch(() => {});
     }
   }
   const addRow = (j, isChild) => {
