@@ -33,7 +33,6 @@ First ask me these, and don't guess:
 - the base directory to install into (see README "Directory layout")
 - my OpenAI-compatible LLM endpoint URL and model name, and whether
   that model is vision-capable — required for the scanned-PDF OCR path
-- whether I want the optional Quartz static-site publishing
 - whether this machine has outbound internet or is LAN-only / offline
 
 Then work through these, checking with me at each boundary:
@@ -44,13 +43,17 @@ Then work through these, checking with me at each boundary:
 4. Walk me through the README's "First run — start with a small test"
    on one short PDF, end to end. Don't skip this — a failure on a
    3-page test is far cheaper to diagnose than one on a 400-page scan.
-5. Quartz, only if I said yes — follow the "Publishing a KB as a
-   website (Quartz)" section of docs/OPERATIONS.md. Two traps cause
-   most first-publish failures: `npx quartz plugin install` is a
-   required step and is easy to miss (it is `plugin install` — there
-   is no `plugin create`), and on an offline or LAN-only box the
-   og-image emitter in the default quartz.config.ts fetches a font
-   over the network at build time and must be removed.
+5. Quartz static-site publishing. Do not silently skip this step:
+   ask me now whether I want it (it is optional, but it is how a
+   finished knowledge base becomes a browsable website). If I say
+   yes, follow the "Publishing a KB as a website (Quartz)" section of
+   docs/OPERATIONS.md. Two traps cause most first-publish failures:
+   `npx quartz plugin install` is a required step and is easy to miss
+   (it is `plugin install` — there is no `plugin create`), and on an
+   offline or LAN-only box the og-image emitter in the default
+   quartz.config.ts fetches a font over the network at build time and
+   must be removed. Finish by publishing the small-test KB from step 4
+   and opening the built site.
 
 If a step fails, check the Troubleshooting section of
 docs/OPERATIONS.md before improvising a fix.
