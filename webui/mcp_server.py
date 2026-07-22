@@ -307,14 +307,13 @@ def _resolve_wiki_page(wiki: Path, path: str) -> Path:
 
 @mcp.tool(structured_output=False)
 def read_wiki_page(project: str, path: str) -> str:
-    """Read one wiki page from a project by its wiki-relative path (as
-    returned by search), e.g. 'summaries/doc.md' or 'entities/fort-marion.md'.
-    Markdown pages return their full text; a 'sources/<doc>.json' path
-    returns that document's per-page text (page numbers preserved).
-    A flat wikilink such as 'concepts/simulation-hypothesis' also
-    resolves, as long as only one page in that section has the name.
-    The text carries (p. N) source-page citations — keep them in your
-    answer, next to the claim each one supports."""
+    """Read one wiki page from a project. The text carries (p. N)
+    source-page citations — keep them in your answer, next to the claim
+    each one supports. Path is wiki-relative, as returned by search:
+    'summaries/doc.md', 'entities/fort-marion.md'. A 'sources/<doc>.json'
+    path returns that document's per-page text instead. A flat wikilink
+    like 'concepts/simulation-hypothesis' resolves too, when only one
+    page in that section has the name."""
     kb_dir = kb.resolve_kb(project)
     wiki = kb_dir / "wiki"
     target = _resolve_wiki_page(wiki, path)
