@@ -1,11 +1,15 @@
 # Recommended client prompt for the MCP server
 
 The MCP server at `/mcp` sends workflow guidance in its `instructions`
-field during the MCP initialize handshake, and every tool carries a
-docstring that reinforces it. Clients differ in how much of that
-reaches the model: Claude Code and Claude Desktop inject the
-instructions; Open-WebUI (via mcpo or its native MCP client) and most
-OpenAPI-bridged clients surface only tool names and parameter schemas.
+field during the MCP initialize handshake; the tool docstrings describe
+what each tool does and deliberately do **not** restate that guidance
+(four copies of one judgment call gave weak models something to
+re-litigate instead of act on). Clients differ in how much of the
+instructions reach the model: Claude Code and Claude Desktop inject
+them; Open-WebUI (via mcpo or its native MCP client), Page Assist, and
+most OpenAPI-bridged clients surface only tool names and parameter
+schemas — for those, the model sees the docstrings alone, so pasting
+the prompt below matters most there.
 
 For those clients, paste the prompt below into the client's system
 prompt / model preset (in Open-WebUI: Workspace → Models → edit the
@@ -72,13 +76,16 @@ workflow:
 - read_wiki_page(project, "AGENTS.md") returns the KB's own schema
   documentation if you need structural detail beyond this list.
 
-## ask() is the last resort
+## When to use ask() instead
 - ask(project, question) runs a full retrieval-and-generation pass on
-  a local LLM and takes 1–3 minutes. Reserve it for questions that
-  need synthesis across many documents — trends over time, "how did X
-  evolve", comparisons — that search plus reading a few pages cannot
-  assemble. Never use it for simple lookups, and never call it on
-  more than one project for the same question.
+  a local LLM and takes 1–3 minutes. Use it when the question calls
+  for a summary, comparison, or explanation spanning multiple
+  documents — "tell me about X", "how did X evolve", trends over time
+  — which search plus reading a few pages cannot assemble. Do not use
+  it for simple lookups, and do not call it on more than one project
+  for the same question.
+- Decide once and act. If the question names a topic rather than a
+  fact, ask() is the right call; do not re-weigh it.
 
 ## Citations
 - Wiki pages and ask() answers cite source pages as (p. N).

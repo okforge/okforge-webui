@@ -24,20 +24,25 @@ from . import config, jobs, kb
 
 mcp = FastMCP(
     "okforge",
+    # This block is the ONE place the search-vs-ask routing rule is
+    # stated. Repeating it in the tool docstrings gave weak client models
+    # four versions of the same judgment call to re-litigate, and some
+    # ruminated past their thinking budget without ever calling anything.
+    # Keep the rule here, deterministic; keep docstrings descriptive.
     instructions=(
         "Query local okforge knowledge bases — one per subject, each a "
         "citation-backed wiki compiled from source documents (books, "
-        "papers, video transcripts). Workflow: call list_projects once and "
-        "pick the ONE project whose 'about' text matches the question; if "
-        "none is an obvious match, ask the user which they mean instead of "
-        "guessing. Then search(project, query) for fact lookups (lexical "
-        "substring, sub-second, no LLM) and read_wiki_page to read each "
-        "hit's page before citing it; use ask(project, question) only for "
-        "synthesis across many documents — each ask runs a full retrieval-"
-        "and-generation pass on a local LLM (1-3 minutes), so NEVER send "
-        "the same question to several projects; to compare KBs, query them "
-        "one at a time. Answers cite source pages as (p. N); in video-"
-        "transcript KBs page N is the N-th 5-minute block of the video. "
+        "papers, video transcripts).\n\n"
+        "Start by calling list_projects and picking the ONE project whose "
+        "'about' text matches the question. If none is an obvious match, "
+        "ask the user which they mean instead of guessing. Query that one "
+        "project; to compare knowledge bases, query them one at a time.\n\n"
+        "Choosing a tool: default to search, then read_wiki_page on the "
+        "hits worth citing. Use ask only when the question calls for a "
+        "summary, comparison, or explanation spanning multiple documents.\n\n"
+        "Answers cite source pages as (p. N) where the documents were "
+        "ingested page by page; in video-transcript knowledge bases page N "
+        "is the N-th 5-minute block of the video. "
         "read_wiki_page(project, 'AGENTS.md') returns a KB's schema "
         "documentation; the MCP prompt 'kb-search-guide' has the full "
         "recommended search strategy."
@@ -115,8 +120,7 @@ _LIST_FIELDS = ("name", "language", "docs", "concepts", "entities",
 def list_projects() -> list[dict]:
     """List all knowledge-base projects: content stats plus an 'about'
     line describing what each project covers. Use the 'about' text to
-    pick the ONE project relevant to the user's question before calling
-    ask — asking multiple projects wastes minutes per call."""
+    pick the one project relevant to the user's question."""
     out = []
     for info in kb.list_kbs():
         row = {"name": info["name"], "about": _about(Path(info["path"]))}
@@ -172,13 +176,12 @@ def _snippet(line: str, needle_pos: int) -> str:
 
 @mcp.tool(structured_output=False)
 def search(project: str, query: str, max_results: int = 20) -> list[dict]:
-    """Fast lexical search over ONE project's wiki — no LLM, sub-second.
-    Use this FIRST for fact lookups (names, dates, places, part numbers);
-    only fall back to ask() when you need synthesis across sources.
-    Case-insensitive substring match. Returns wiki-relative path, a
-    snippet per hit, and the real source page number when the hit is in
-    a document's per-page text (cite as "p. N"). Pair with
-    read_wiki_page(project, path) to pull a whole page."""
+    """Lexical search over ONE project's wiki: case-insensitive substring
+    match, sub-second, no LLM. Finds names, dates, places, part numbers
+    and the passages around them. Returns a wiki-relative path and a
+    snippet per hit, plus the source page number when the hit is in a
+    document's per-page text (cite as "p. N"). Read a whole hit with
+    read_wiki_page(project, path)."""
     kb_dir = kb.resolve_kb(project)
     wiki = kb_dir / "wiki"
     needle = query.strip().lower()
@@ -250,8 +253,7 @@ def read_wiki_page(project: str, path: str) -> str:
     """Read one wiki page from a project by its wiki-relative path (as
     returned by search), e.g. 'summaries/doc.md' or 'entities/fort-marion.md'.
     Markdown pages return their full text; a 'sources/<doc>.json' path
-    returns that document's per-page text (page numbers preserved).
-    Cheap and instant — prefer search + this over ask() for lookups."""
+    returns that document's per-page text (page numbers preserved)."""
     kb_dir = kb.resolve_kb(project)
     wiki = kb_dir / "wiki"
     # Tolerate Windows-style separators from clients that cached them.
@@ -268,12 +270,10 @@ def read_wiki_page(project: str, path: str) -> str:
 
 @mcp.tool(structured_output=False)
 async def ask(project: str, question: str, ctx: Context | None = None) -> str:
-    """Ask ONE project's knowledge base a question; returns the answer
-    with (p. N) page citations. Expensive: a full retrieval + generation
-    pass on a local LLM, typically 1-3 minutes — for simple fact lookups
-    use search + read_wiki_page instead. Pick the right project first via
-    list_projects' 'about' text — do not fan the same question out across
-    projects."""
+    """Ask ONE project's knowledge base a question; returns a written
+    answer citing source pages as (p. N) where that project's documents
+    were ingested page by page. Runs a full retrieval and generation pass
+    on a local LLM, typically 1-3 minutes."""
     kb_dir = kb.resolve_kb(project)
     question = question.strip()
     if not question:
