@@ -73,11 +73,22 @@ _CLIENT_PROMPT_DOC = config.REPO_DIR / "docs" / "MCP_CLIENT_PROMPT.md"
 
 
 def _client_prompt_text() -> str:
-    """The recommended client prompt: the doc's one fenced block."""
+    """The recommended client prompt: the doc's marked fenced block.
+
+    The doc carries a second, condensed block for small models behind
+    clients that drop the server instructions. Only a client that can
+    fetch MCP prompts at all gets this one, and those are the capable
+    ones, so it serves the full text — selected by marker rather than
+    by position, so reordering the doc can't silently swap them.
+    """
     doc = _CLIENT_PROMPT_DOC.read_text(encoding="utf-8")
-    m = re.search(r"```text\n(.*?)\n```", doc, flags=re.DOTALL)
+    m = re.search(
+        r"<!-- kb-search-guide -->\s*```text\n(.*?)\n```", doc, flags=re.DOTALL
+    )
     if not m:
-        raise RuntimeError(f"no ```text block in {_CLIENT_PROMPT_DOC}")
+        raise RuntimeError(
+            f"no <!-- kb-search-guide --> ```text block in {_CLIENT_PROMPT_DOC}"
+        )
     return m.group(1)
 
 
@@ -301,7 +312,9 @@ def read_wiki_page(project: str, path: str) -> str:
     Markdown pages return their full text; a 'sources/<doc>.json' path
     returns that document's per-page text (page numbers preserved).
     A flat wikilink such as 'concepts/simulation-hypothesis' also
-    resolves, as long as only one page in that section has the name."""
+    resolves, as long as only one page in that section has the name.
+    The text carries (p. N) source-page citations — keep them in your
+    answer, next to the claim each one supports."""
     kb_dir = kb.resolve_kb(project)
     wiki = kb_dir / "wiki"
     target = _resolve_wiki_page(wiki, path)
@@ -315,8 +328,9 @@ def read_wiki_page(project: str, path: str) -> str:
 async def ask(project: str, question: str, ctx: Context | None = None) -> str:
     """Ask ONE project's knowledge base a question; returns a written
     answer citing source pages as (p. N) where that project's documents
-    were ingested page by page. Runs a full retrieval and generation pass
-    on a local LLM, typically 1-3 minutes."""
+    were ingested page by page — keep those citations in your reply.
+    Runs a full retrieval and generation pass on a local LLM, typically
+    1-3 minutes."""
     kb_dir = kb.resolve_kb(project)
     question = question.strip()
     if not question:
