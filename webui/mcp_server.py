@@ -286,10 +286,15 @@ def _resolve_wiki_page(wiki: Path, path: str) -> Path:
         raise ValueError(f"no such wiki page: {path!r}")
     wanted = ({stem} if stem.endswith((".md", ".json"))
               else {f"{stem}.md", f"{stem}.json"})
-    # A leading real directory scopes the search, which both speeds it up
-    # and keeps same-named pages in different sections from colliding.
-    head = PurePosixPath(rel).parts[0]
-    root = wiki / head if len(PurePosixPath(rel).parts) > 1 and (wiki / head).is_dir() else wiki
+    # A named section scopes the search and is binding: concepts/<slug>
+    # must never resolve to a same-named entities page. If the section does
+    # not exist there is nothing to find.
+    parts = PurePosixPath(rel).parts
+    root = wiki
+    if len(parts) > 1:
+        root = wiki / parts[0]
+        if not root.is_dir():
+            raise ValueError(f"no such wiki page: {path!r}")
     hits = sorted({p for name in wanted for p in root.rglob(name) if p.is_file()})
 
     if not hits:
