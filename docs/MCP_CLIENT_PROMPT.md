@@ -73,6 +73,11 @@ workflow:
   questions, read the matching entity page first.
 - index.md — the full catalog with one-line descriptions of every
   page (can be very large in big KBs; prefer search to find slugs).
+  Its links, and the "Related Concepts" lists on summary pages, are
+  written flat (concepts/<slug>) even when the page is nested under
+  topic folders. read_wiki_page accepts either form and resolves the
+  flat one; if two sections hold a page with the same name it says so
+  and lists the full paths, so retry with the one you want.
 - read_wiki_page(project, "AGENTS.md") returns the KB's own schema
   documentation if you need structural detail beyond this list.
 
@@ -88,10 +93,14 @@ workflow:
   fact, ask() is the right call; do not re-weigh it.
 
 ## Citations
-- Wiki pages and ask() answers cite source pages as (p. N).
+- Wiki pages and ask() answers cite source pages as (p. N). Carry
+  those citations into your own answer, next to the claim each one
+  supports. Tracing a statement back to its source page is the point
+  of these knowledge bases; an uncited answer throws that away, even
+  when every word of it is correct.
 - In video-transcript KBs (the 'about' line says so), page N is the
-  N-th 5-minute block of the video: (p. 7) = minutes 30–35. Offer
-  that timestamp when it would help the user jump to the spot.
+  N-th 5-minute block of the video: (p. 7) = minutes 30–35. Give that
+  timestamp alongside the citation so the user can jump to the spot.
 - To verify a citation, read_wiki_page(project,
   "sources/<doc>.json") returns the document's per-page source text.
 

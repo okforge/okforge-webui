@@ -15,7 +15,7 @@ import asyncio
 import json
 import os
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
@@ -40,9 +40,13 @@ mcp = FastMCP(
         "Choosing a tool: default to search, then read_wiki_page on the "
         "hits worth citing. Use ask only when the question calls for a "
         "summary, comparison, or explanation spanning multiple documents.\n\n"
-        "Answers cite source pages as (p. N) where the documents were "
-        "ingested page by page; in video-transcript knowledge bases page N "
-        "is the N-th 5-minute block of the video. "
+        "Wiki pages cite their source pages as (p. N) where the documents "
+        "were ingested page by page. Carry those citations into your own "
+        "answer, next to the claim each one supports — tracing a statement "
+        "back to its source page is the point of these knowledge bases, and "
+        "an uncited answer throws that away. In video-transcript knowledge "
+        "bases page N is the N-th 5-minute block of the video, so give the "
+        "timestamp too: (p. 14) = minutes 65-70.\n\n"
         "read_wiki_page(project, 'AGENTS.md') returns a KB's schema "
         "documentation; the MCP prompt 'kb-search-guide' has the full "
         "recommended search strategy."
@@ -248,20 +252,59 @@ def search(project: str, query: str, max_results: int = 20) -> list[dict]:
     return results
 
 
+def _resolve_wiki_page(wiki: Path, path: str) -> Path:
+    """Locate a wiki page, tolerating the links the KB itself publishes.
+
+    index.md and every summary's "Related Concepts" block emit flat
+    wikilinks like `concepts/simulation-hypothesis` (no extension), but
+    in a large KB the page is nested under topic folders — 812 of
+    ScottAdamsCoffee2025's 814 concept pages are. Taking those links
+    literally is the obvious client move and it used to dead-end, so
+    fall back to matching the basename under the named top-level dir.
+    """
+    # Tolerate Windows-style separators from clients that cached them.
+    rel = path.replace("\\", "/").strip("/")
+    target = (wiki / rel).resolve()
+    if not target.is_relative_to(wiki.resolve()):
+        raise ValueError(f"path escapes the wiki: {path!r}")
+    if target.is_file() and target.suffix in (".md", ".json"):
+        return target
+
+    stem = PurePosixPath(rel).name
+    if not stem:
+        raise ValueError(f"no such wiki page: {path!r}")
+    wanted = ({stem} if stem.endswith((".md", ".json"))
+              else {f"{stem}.md", f"{stem}.json"})
+    # A leading real directory scopes the search, which both speeds it up
+    # and keeps same-named pages in different sections from colliding.
+    head = PurePosixPath(rel).parts[0]
+    root = wiki / head if len(PurePosixPath(rel).parts) > 1 and (wiki / head).is_dir() else wiki
+    hits = sorted({p for name in wanted for p in root.rglob(name) if p.is_file()})
+
+    if not hits:
+        raise ValueError(f"no such wiki page: {path!r}")
+    if len(hits) > 1:
+        # Never guess between distinct pages — the caller cites what it
+        # reads, so silently picking one would mis-source the answer.
+        opts = ", ".join(p.relative_to(wiki).as_posix() for p in hits[:8])
+        raise ValueError(
+            f"{path!r} is ambiguous — {len(hits)} pages share that name. "
+            f"Retry with a full path: {opts}"
+        )
+    return hits[0]
+
+
 @mcp.tool(structured_output=False)
 def read_wiki_page(project: str, path: str) -> str:
     """Read one wiki page from a project by its wiki-relative path (as
     returned by search), e.g. 'summaries/doc.md' or 'entities/fort-marion.md'.
     Markdown pages return their full text; a 'sources/<doc>.json' path
-    returns that document's per-page text (page numbers preserved)."""
+    returns that document's per-page text (page numbers preserved).
+    A flat wikilink such as 'concepts/simulation-hypothesis' also
+    resolves, as long as only one page in that section has the name."""
     kb_dir = kb.resolve_kb(project)
     wiki = kb_dir / "wiki"
-    # Tolerate Windows-style separators from clients that cached them.
-    target = (wiki / path.replace("\\", "/")).resolve()
-    if not target.is_relative_to(wiki.resolve()):
-        raise ValueError(f"path escapes the wiki: {path!r}")
-    if target.suffix not in (".md", ".json") or not target.is_file():
-        raise ValueError(f"no such wiki page: {path!r}")
+    target = _resolve_wiki_page(wiki, path)
     text = target.read_text(encoding="utf-8", errors="replace")
     if len(text) > 200_000:
         text = text[:200_000] + "\n…(truncated)"
