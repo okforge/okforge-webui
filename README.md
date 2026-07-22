@@ -24,6 +24,10 @@ order — the upload shows the exact order and combined name before
 anything is sent. Other formats (docx, pptx, html …) should be
 pre-converted to markdown first.
 
+![okforge-webui with the Dade County Building Code (1935) knowledge
+base loaded: the five workflow stages, job queue, KB stats, and wiki
+browser](docs/webui-screenshot.png)
+
 ## What's in the box
 
 - **Serial job queue** (sqlite + one worker, on purpose): one `add` or
