@@ -104,7 +104,14 @@ def _about(kb_dir: Path) -> str | None:
     return " ".join(snippets)[:400] or None
 
 
-@mcp.tool()
+# Client-facing slice of a KB record. The full kb.list_kbs() row also
+# carries server internals — filesystem paths, endpoint URLs, the publish
+# rsync destination — that no MCP client needs and that double the payload.
+_LIST_FIELDS = ("name", "language", "docs", "concepts", "entities",
+                "images", "citations")
+
+
+@mcp.tool(structured_output=False)
 def list_projects() -> list[dict]:
     """List all knowledge-base projects: content stats plus an 'about'
     line describing what each project covers. Use the 'about' text to
@@ -112,12 +119,13 @@ def list_projects() -> list[dict]:
     ask — asking multiple projects wastes minutes per call."""
     out = []
     for info in kb.list_kbs():
-        info["about"] = _about(Path(info["path"]))
-        out.append(info)
+        row = {"name": info["name"], "about": _about(Path(info["path"]))}
+        row.update({k: info.get(k) for k in _LIST_FIELDS if k != "name"})
+        out.append(row)
     return out
 
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 def project_status(project: str) -> dict:
     """Status of one project: content stats, LLM endpoint, and the state
     of the ingest job queue (anything running or queued for this KB)."""
@@ -162,7 +170,7 @@ def _snippet(line: str, needle_pos: int) -> str:
     return ("…" if start else "") + line[start : start + _SNIPPET_LEN] + "…"
 
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 def search(project: str, query: str, max_results: int = 20) -> list[dict]:
     """Fast lexical search over ONE project's wiki — no LLM, sub-second.
     Use this FIRST for fact lookups (names, dates, places, part numbers);
@@ -237,7 +245,7 @@ def search(project: str, query: str, max_results: int = 20) -> list[dict]:
     return results
 
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 def read_wiki_page(project: str, path: str) -> str:
     """Read one wiki page from a project by its wiki-relative path (as
     returned by search), e.g. 'summaries/doc.md' or 'entities/fort-marion.md'.
@@ -258,7 +266,7 @@ def read_wiki_page(project: str, path: str) -> str:
     return text
 
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def ask(project: str, question: str, ctx: Context | None = None) -> str:
     """Ask ONE project's knowledge base a question; returns the answer
     with (p. N) page citations. Expensive: a full retrieval + generation
