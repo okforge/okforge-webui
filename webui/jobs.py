@@ -503,24 +503,9 @@ def _run_ocr(job: dict) -> None:
         raise RuntimeError(f"okforge-vision-ocr exited {rc}")
 
 
-def _indexed_stems(kb_dir: Path) -> set[str]:
-    """Stems of the SOURCE FILES already in the KB, from `openkb list --json`
-    (okforge's machine interface — full names, no table truncation).
-
-    Every caller compares these against a filename on disk: ``path.stem`` of a
-    file about to be added, ``md.stem`` from a ``raw/*.md`` glob, a chunk stem
-    in ``md-out/``, or ``raw/<stem>.md`` reassembled for the sources download.
-    So this must return *filename* stems.
-
-    It used to return the ``summaries`` list, which holds the engine's
-    **sanitized** doc names — ``converter._sanitize_stem`` replaces anything
-    outside ``[A-Za-z0-9_-]`` with a hyphen. For a source called
-    ``my doc_p1_9.md`` the summary is ``my-doc_p1_9``, which matches no
-    filename, so the chunk read as unindexed forever and
-    ``raw/my-doc_p1_9.md`` resolved to nothing. Two bugs, one cause:
-    a permanent "not ingested yet" badge, and chunks silently missing from
-    the sources.md download. ``documents[].name`` is the real filename.
-    """
+def _list_json(kb_dir: Path) -> dict:
+    """`openkb list --json` for a KB (okforge's machine interface — full
+    names, no table truncation)."""
     proc = subprocess.run(
         [str(config.OPENKB_BIN), "--kb-dir", str(kb_dir), "list", "--json"],
         cwd=kb_dir,
@@ -531,12 +516,65 @@ def _indexed_stems(kb_dir: Path) -> set[str]:
     )
     if proc.returncode != 0:
         raise RuntimeError(f"openkb list failed: {proc.stderr.strip()}")
-    data = json.loads(proc.stdout)
+    return json.loads(proc.stdout)
+
+
+def _indexed_stems(kb_dir: Path) -> set[str]:
+    """Stems of the SOURCE FILENAMES already in the KB.
+
+    Every caller compares these against a filename: ``path.stem`` of a file
+    about to be added, ``md.stem`` from a ``raw/*.md`` glob, or a chunk stem
+    in ``md-out/``. So this must return *filename* stems.
+
+    It used to return the ``summaries`` list, which holds the engine's
+    **sanitized** doc names — ``converter._sanitize_stem`` replaces anything
+    outside ``[A-Za-z0-9_-]`` with a hyphen. A chunk called ``my doc_p1_9.md``
+    indexes as ``my-doc_p1_9``, matching no filename, so it read as "not
+    ingested yet" forever. ``documents[].name`` is the real filename.
+
+    Note this is *not* the right answer for locating the file on disk — see
+    :func:`indexed_raw_files`.
+    """
+    data = _list_json(kb_dir)
     docs = data.get("documents") or []
     stems = {Path(d["name"]).stem for d in docs if d.get("name")}
     # Older engines emitted only `summaries`; fall back so a webui ahead of
     # its engine still reports something rather than nothing.
     return stems or set(data.get("summaries", []))
+
+
+def indexed_raw_files(kb_dir: Path) -> list[Path]:
+    """Existing ``raw/`` files for the KB's indexed documents.
+
+    Deliberately separate from :func:`_indexed_stems`, which answers a
+    different question. Comparisons ("is this file already ingested?") need
+    the *source filename*; reassembling the sources download needs whichever
+    name is actually **on disk**, and those differ.
+
+    The engine archives a copy of the source into ``raw/`` under its
+    sanitized doc name, so a document added through the CLI leaves only
+    ``raw/<doc_name>.md`` while ``documents[].name`` still records the
+    original filename. A document the webui placed in ``raw/`` first and
+    added in place leaves both. Resolving the filename first and falling
+    back to the doc name covers both without either dropping silently.
+    """
+    data = _list_json(kb_dir)
+    docs = data.get("documents") or []
+    if not docs:  # engine too old to emit `documents`
+        return [
+            p for s in data.get("summaries", [])
+            if (p := kb_dir / "raw" / f"{s}.md").is_file()
+        ]
+    out: list[Path] = []
+    for d in docs:
+        for candidate in (d.get("name"), d.get("doc_name")):
+            if not candidate:
+                continue
+            p = kb_dir / "raw" / f"{Path(candidate).stem}.md"
+            if p.is_file():
+                out.append(p)
+                break
+    return out
 
 
 def _log_line(job_id: int, text: str) -> None:
