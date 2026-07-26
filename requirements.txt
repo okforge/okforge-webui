@@ -3,7 +3,14 @@
 #
 # The engine — auto-published to PyPI from
 # https://github.com/okforge/okforge on every release tag.
-okforge==0.9.4
+#
+# 0.10.0 emits Open Knowledge Format v0.2: wiki frontmatter carries
+# `sources` as {id, resource} mappings and `generated: {by, at}` in place
+# of the retired `timestamp`. Bundles written by earlier versions stay
+# readable, so this is safe to deploy over an existing KB root; pages a
+# new ingest touches convert, untouched pages stay v0.1. `okforge
+# okf-migrate` converts a whole bundle if you want one uniform.
+okforge==0.10.0
 
 # webui backend
 fastapi==0.139.0
@@ -13,7 +20,7 @@ httpx==0.28.1
 pydantic==2.13.4
 
 # MCP server (/mcp) — must match okforge's own exact pin (its native
-# `okforge mcp` server also depends on this package); okforge 0.9.4 pins
+# `okforge mcp` server also depends on this package); okforge 0.10.0 pins
 # mcp==1.27.1 exactly, so this can't float independently anymore.
 mcp==1.27.1
 
