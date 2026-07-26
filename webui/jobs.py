@@ -288,6 +288,18 @@ def _set_status(job_id: int, status: str, error: str | None = None) -> None:
             )
 
 
+def _set_warning(job_id: int, text: str) -> None:
+    """Attach a note to a job without changing its status.
+
+    The UI renders ``status — error`` for any status, so this surfaces a
+    caveat on an otherwise-successful job in the queue instead of burying it
+    in the job log where only someone already suspicious would find it.
+    The runner preserves it when marking the job done.
+    """
+    with _db_lock, _conn() as c:
+        c.execute("UPDATE jobs SET error = ? WHERE id = ?", (text, job_id))
+
+
 def cancel(job_id: int) -> dict:
     job = get_job(job_id)
     if job is None:
@@ -492,8 +504,23 @@ def _run_ocr(job: dict) -> None:
 
 
 def _indexed_stems(kb_dir: Path) -> set[str]:
-    """Doc stems already in the KB, from `openkb list --json` (okforge's
-    machine interface — full names, no table truncation)."""
+    """Stems of the SOURCE FILES already in the KB, from `openkb list --json`
+    (okforge's machine interface — full names, no table truncation).
+
+    Every caller compares these against a filename on disk: ``path.stem`` of a
+    file about to be added, ``md.stem`` from a ``raw/*.md`` glob, a chunk stem
+    in ``md-out/``, or ``raw/<stem>.md`` reassembled for the sources download.
+    So this must return *filename* stems.
+
+    It used to return the ``summaries`` list, which holds the engine's
+    **sanitized** doc names — ``converter._sanitize_stem`` replaces anything
+    outside ``[A-Za-z0-9_-]`` with a hyphen. For a source called
+    ``my doc_p1_9.md`` the summary is ``my-doc_p1_9``, which matches no
+    filename, so the chunk read as unindexed forever and
+    ``raw/my-doc_p1_9.md`` resolved to nothing. Two bugs, one cause:
+    a permanent "not ingested yet" badge, and chunks silently missing from
+    the sources.md download. ``documents[].name`` is the real filename.
+    """
     proc = subprocess.run(
         [str(config.OPENKB_BIN), "--kb-dir", str(kb_dir), "list", "--json"],
         cwd=kb_dir,
@@ -505,7 +532,11 @@ def _indexed_stems(kb_dir: Path) -> set[str]:
     if proc.returncode != 0:
         raise RuntimeError(f"openkb list failed: {proc.stderr.strip()}")
     data = json.loads(proc.stdout)
-    return set(data.get("summaries", []))
+    docs = data.get("documents") or []
+    stems = {Path(d["name"]).stem for d in docs if d.get("name")}
+    # Older engines emitted only `summaries`; fall back so a webui ahead of
+    # its engine still reports something rather than nothing.
+    return stems or set(data.get("summaries", []))
 
 
 def _log_line(job_id: int, text: str) -> None:
@@ -776,10 +807,16 @@ def _reroll_if_empty(job: dict, kb_dir: Path, path: Path,
     if kbmod._count(wiki / "concepts") + kbmod._count(wiki / "entities") > 0:
         _log_line(job["id"], "re-roll recovered: concepts/entities present now")
     else:
+        msg = ("0 concepts/entities after re-roll — blank documents are "
+               "legitimately concept-free; otherwise re-ingest the chunk")
         _log_line(job["id"],
                   "[WARN] still 0 concepts/entities after the re-roll — a "
                   "blank/empty document is legitimately concept-free; "
                   "otherwise use \"Re-ingest chunk\" (stage 4) to roll again")
+        # Not a failure: the add succeeded and the document may genuinely have
+        # no concepts, so marking it failed would cry wolf on blank pages.
+        # Surface it on the job instead of only in the log.
+        _set_warning(job["id"], msg)
 
 
 def _snapshot_kb(job_id: int, kb_dir: Path, label: str) -> None:
@@ -1242,7 +1279,10 @@ def _worker_loop() -> None:
                 log.write(f"ERROR: {e}\n")
         else:
             if get_job(job_id)["status"] == "running":
-                _set_status(job_id, "done")
+                # Carry any warning a runner attached (see _set_warning) —
+                # _set_status would otherwise null it out and the caveat
+                # would vanish from the queue.
+                _set_status(job_id, "done", error=get_job(job_id)["error"])
         finally:
             with _current_lock:
                 _current["job_id"] = None
