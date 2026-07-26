@@ -865,16 +865,18 @@ def get_sources_md(name: str):
     except ValueError as e:
         raise HTTPException(404, str(e))
     try:
-        stems = jobs._indexed_stems(kb_dir)
+        # Resolve to files on disk, not to stems: the engine archives its
+        # copy under the sanitized doc name, so for a source whose filename
+        # needed sanitizing the two differ and a stem-only lookup drops the
+        # chunk from the download without saying so.
+        files = jobs.indexed_raw_files(kb_dir)
     except RuntimeError as e:
         raise HTTPException(500, str(e))
 
     parts = []
-    for stem in sorted(stems, key=jobs._page_key):
-        p = kb_dir / "raw" / f"{stem}.md"
-        if p.is_file():
-            parts.append(f"<!-- source: {stem}.md -->\n\n"
-                         + p.read_text(encoding="utf-8").strip())
+    for p in sorted(files, key=lambda f: jobs._page_key(f.stem)):
+        parts.append(f"<!-- source: {p.name} -->\n\n"
+                     + p.read_text(encoding="utf-8").strip())
     if not parts:
         raise HTTPException(404, f"{name} has no ingested raw sources")
     return PlainTextResponse(
