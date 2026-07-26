@@ -10,7 +10,11 @@
 # readable, so this is safe to deploy over an existing KB root; pages a
 # new ingest touches convert, untouched pages stay v0.1. `okforge
 # okf-migrate` converts a whole bundle if you want one uniform.
-okforge==0.10.0
+#
+# 0.10.1 makes `add` exit non-zero when compilation fails. Required by
+# this webui: jobs._run_add raises on a non-zero exit, so on 0.10.0 and
+# earlier a wholly failed ingest was marked done.
+okforge==0.10.1
 
 # webui backend
 fastapi==0.139.0
